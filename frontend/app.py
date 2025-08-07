@@ -8,12 +8,13 @@ from cargar_excel import cargar_excel_empleados
 from verificacion import verificar_email
 import pandas as pd
 
+BASE_URL = "https://systeso-backend-production.up.railway.app"
 
 # -------------------------- mostrarhistorial de cargas --------------------------
 def mostrar_historial_cargas():
     token = obtener_token()
     headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get("https://systeso-backend-production.up.railway.app/empleados/historial_cargas", headers=headers)
+    response = requests.get(f"{BASE_URL}/empleados/historial_cargas", headers=headers)
     if response.status_code == 200:
         historial = response.json()
         st.markdown("### 📂 Historial de archivos Excel cargados:")

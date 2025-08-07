@@ -14,7 +14,7 @@ def verificar_email():
         return
 
     try:
-        url = f"systeso-backend-production.up.railway.app/users/verificar_email?token={token}"
+        url = f"https://systeso-backend-production.up.railway.app/users/verificar_email?token={token}"
         response = requests.get(url)
 
         if response.status_code == 200:
@@ -59,7 +59,7 @@ def reset_password_frontend(token):
         else:
             with st.spinner("Restableciendo..."):
                 resp = requests.post(
-                    "systeso-backend-production.up.railway.app/users/reset_password",
+                    "https://systeso-backend-production.up.railway.app/users/reset_password",
                     json={"token": token, "nueva_password": nueva_password}
                 )
                 if resp.status_code == 200:

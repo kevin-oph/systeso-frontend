@@ -1,11 +1,13 @@
 import streamlit as st
 import re
 import requests
-from utils import EMAIL_REGEX, PASSWORD_REGEX
+from utils import EMAIL_REGEX
+
+BASE_URL = "https://systeso-backend-production.up.railway.app"
 
 def login_user(email, password):
     try:
-        response = requests.post("systeso-backend-production.up.railway.app/users/login", json={
+        response = requests.post(f"{BASE_URL}/users/login", json={
             "email": email,
             "password": password
         })

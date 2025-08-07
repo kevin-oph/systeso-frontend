@@ -22,7 +22,7 @@ def mostrar_formulario_reset(token):
         else:
             with st.spinner("Procesando..."):
                 resp = requests.post(
-                    "systeso-backend-production.up.railway.app/users/reset_password",
+                    "https://systeso-backend-production.up.railway.app/users/reset_password",
                     json={"token": token, "nueva_password": nueva}  # <= RECUERDA: debe coincidir con el backend
                 )
                 if resp.status_code == 200:
