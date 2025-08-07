@@ -246,7 +246,7 @@ elif st.session_state.view == "login":
             with st.spinner("📨 Reenviando correo..."):
                 try:
                     response = requests.post(
-                        "systeso-backend-production.up.railway.app/users/reenviar_verificacion",
+                        "https://systeso-backend-production.up.railway.app/users/reenviar_verificacion",
                         json={"email": email}
                     )
                     if response.status_code == 200:
@@ -312,7 +312,7 @@ if st.session_state.view == "register":
                 "password": password
             }
             with st.spinner("Registrando usuario..."):
-                response = requests.post("systeso-backend-production.up.railway.app/users/register", json=data)
+                response = requests.post("https://systeso-backend-production.up.railway.app/users/register", json=data)
             if response.status_code == 201:
                 st.success("🎉 Registro exitoso. Revisa tu correo para verificar tu cuenta.")
                 st.session_state.reset_register_fields = True
@@ -341,7 +341,7 @@ if st.session_state.view == "reenviar":
             with st.spinner("🔄 Enviando correo de verificación..."):
                 try:
                     response = requests.post(
-                        "systeso-backend-production.up.railway.app/users/reenviar_verificacion",
+                        "https://systeso-backend-production.up.railway.app/users/reenviar_verificacion",
                         json={"email": email_reintento}
                     )
                     if response.status_code == 200:
@@ -378,7 +378,7 @@ elif st.session_state.view == "recuperar_password":
             with st.spinner("Enviando correo..."):
                 try:
                     resp = requests.post(
-                        "systeso-backend-production.up.railway.app/users/solicitar_reset",
+                        "https://systeso-backend-production.up.railway.app/users/solicitar_reset",
                         json={"email": email_reset}
                     )
                     if resp.status_code == 200:

@@ -1,7 +1,7 @@
 import streamlit as st
 import re
 import requests
-from utils import EMAIL_REGEX
+from utils import EMAIL_REGEX, PASSWORD_REGEX
 
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
@@ -75,7 +75,7 @@ def register_user():
         else:
             data = {"clave": clave, "rfc": rfc, "email": email, "password": password}
             with st.spinner("📡 Enviando solicitud..."):
-                response = requests.post("systeso-backend-production.up.railway.app/users/register", json=data)
+                response = requests.post("https://systeso-backend-production.up.railway.app/users/register", json=data)
 
             if response.status_code == 201:
                 st.session_state.registro_exitoso = True
