@@ -9,7 +9,7 @@ from utils import obtener_token
 def mostrar_recibos():
     token = obtener_token()
     headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get("http://localhost:8000/recibos/", headers=headers)
+    response = requests.get("systeso-backend-production.up.railway.app/recibos/", headers=headers)
 
     if response.status_code != 200:
         st.error("Error al obtener recibos")
@@ -86,7 +86,7 @@ def mostrar_recibos():
 
     # Obtener PDF
     pdf_response = requests.get(
-        f"http://localhost:8000/recibos/{selected['id']}/file",
+        f"systeso-backend-production.up.railway.app/recibos/{selected['id']}/file",
         headers=headers
     )
 
@@ -130,7 +130,7 @@ def subir_zip():
         if st.button("🚀 Subir ZIP", use_container_width=True):
             with st.spinner("⏳ Procesando archivo..."):
                 files = {"archivo": (archivo.name, archivo.getvalue())}
-                response = requests.post("http://localhost:8000/recibos/upload_zip", headers=headers, files=files)
+                response = requests.post("systeso-backend-production.up.railway.app/recibos/upload_zip", headers=headers, files=files)
 
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:

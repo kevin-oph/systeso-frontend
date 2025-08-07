@@ -5,7 +5,7 @@ from utils import EMAIL_REGEX, PASSWORD_REGEX
 
 def login_user(email, password):
     try:
-        response = requests.post("http://localhost:8000/users/login", json={
+        response = requests.post("systeso-backend-production.up.railway.app/users/login", json={
             "email": email,
             "password": password
         })
@@ -73,7 +73,7 @@ def register_user():
         else:
             data = {"clave": clave, "rfc": rfc, "email": email, "password": password}
             with st.spinner("📡 Enviando solicitud..."):
-                response = requests.post("http://localhost:8000/users/register", json=data)
+                response = requests.post("systeso-backend-production.up.railway.app/users/register", json=data)
 
             if response.status_code == 201:
                 st.session_state.registro_exitoso = True

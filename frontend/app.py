@@ -13,7 +13,7 @@ import pandas as pd
 def mostrar_historial_cargas():
     token = obtener_token()
     headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get("http://localhost:8000/empleados/historial_cargas", headers=headers)
+    response = requests.get("https://systeso-backend-production.up.railway.app/empleados/historial_cargas", headers=headers)
     if response.status_code == 200:
         historial = response.json()
         st.markdown("### 📂 Historial de archivos Excel cargados:")
@@ -120,7 +120,7 @@ rol_guardado = obtener_rol()
 if token and "rol" not in st.session_state:
     try:
         headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get("http://localhost:8000/users/me", headers=headers)
+        response = requests.get("https://systeso-backend-production.up.railway.app/users/me", headers=headers)
         if response.status_code == 200:
             data = response.json()
             st.session_state.nombre = data.get("nombre", "Empleado")
@@ -245,7 +245,7 @@ elif st.session_state.view == "login":
             with st.spinner("📨 Reenviando correo..."):
                 try:
                     response = requests.post(
-                        "http://localhost:8000/users/reenviar_verificacion",
+                        "systeso-backend-production.up.railway.app/users/reenviar_verificacion",
                         json={"email": email}
                     )
                     if response.status_code == 200:
@@ -311,7 +311,7 @@ if st.session_state.view == "register":
                 "password": password
             }
             with st.spinner("Registrando usuario..."):
-                response = requests.post("http://localhost:8000/users/register", json=data)
+                response = requests.post("systeso-backend-production.up.railway.app/users/register", json=data)
             if response.status_code == 201:
                 st.success("🎉 Registro exitoso. Revisa tu correo para verificar tu cuenta.")
                 st.session_state.reset_register_fields = True
@@ -340,7 +340,7 @@ if st.session_state.view == "reenviar":
             with st.spinner("🔄 Enviando correo de verificación..."):
                 try:
                     response = requests.post(
-                        "http://localhost:8000/users/reenviar_verificacion",
+                        "systeso-backend-production.up.railway.app/users/reenviar_verificacion",
                         json={"email": email_reintento}
                     )
                     if response.status_code == 200:
@@ -377,7 +377,7 @@ elif st.session_state.view == "recuperar_password":
             with st.spinner("Enviando correo..."):
                 try:
                     resp = requests.post(
-                        "http://localhost:8000/users/solicitar_reset",
+                        "systeso-backend-production.up.railway.app/users/solicitar_reset",
                         json={"email": email_reset}
                     )
                     if resp.status_code == 200:

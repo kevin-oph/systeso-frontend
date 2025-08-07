@@ -16,7 +16,7 @@ def cargar_excel_empleados():
 
             with st.spinner("⏳ Procesando archivo..."):
                 files = {"archivo": (archivo.name, archivo.getvalue())}
-                response = requests.post("http://localhost:8000/empleados/cargar_excel", headers=headers, files=files)
+                response = requests.post("systeso-backend-production.up.railway.app/empleados/cargar_excel", headers=headers, files=files)
 
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
