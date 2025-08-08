@@ -7,6 +7,8 @@ from utils import guardar_token, obtener_token, borrar_token, obtener_rol, resta
 from cargar_excel import cargar_excel_empleados
 from verificacion import verificar_email
 import pandas as pd
+from utils import init_auth_cookies
+init_auth_cookies()
 
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
