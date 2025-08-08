@@ -1,61 +1,36 @@
-import os
+# utils.py
 import streamlit as st
 
 EMAIL_REGEX = r"^[\w\.-]+@[\w\.-]+\.\w+$"
 PASSWORD_REGEX = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"
 
-
-TOKEN_FILE = "token.txt"
-
 def guardar_token(token, rol, nombre=None, rfc=None):
-    # Guarda en archivo y también en la sesión
-    with open(TOKEN_FILE, "w") as f:
-        f.write(f"{token}|{rol}|{nombre or ''}|{rfc or ''}")
+    """Guarda todo solo en la sesión del navegador actual."""
     st.session_state["token"] = token
     st.session_state["rol"] = rol
-    st.session_state["nombre"] = nombre
-    st.session_state["rfc"] = rfc
-    
-    
+    if nombre is not None:
+        st.session_state["nombre"] = nombre
+    if rfc is not None:
+        st.session_state["rfc"] = rfc
+
 def restaurar_sesion_completa():
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "r") as f:
-            partes = f.read().split("|")
-            if len(partes) >= 4:
-                token, rol, nombre, rfc = partes
-                st.session_state["token"] = token
-                st.session_state["rol"] = rol
-                st.session_state["nombre"] = nombre or "Empleado"
-                st.session_state["rfc"] = rfc
-
-
+    """No leer de archivos ni variables globales. Cada navegador tiene su propia sesión."""
+    # Si quisieras persistir entre recargas del MISMO navegador, usar cookies del navegador con una librería;
+    # NO uses archivos en el servidor (rompe el aislamiento entre usuarios).
+    return
 
 def obtener_token():
-    if "token" in st.session_state:
-        return st.session_state["token"]
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "r") as f:
-            parts = f.read().split("|")
-            st.session_state["token"] = parts[0]
-            st.session_state["rol"] = parts[1]
-            st.session_state["nombre"] = parts[2] if len(parts) > 2 else ""
-            st.session_state["rfc"] = parts[3] if len(parts) > 3 else ""
-            return parts[0]
-    return None
+    return st.session_state.get("token")
 
 def obtener_rol():
-    if "rol" in st.session_state:
-        return st.session_state["rol"]
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "r") as f:
-            parts = f.read().split("|")
-            st.session_state["rol"] = parts[1]
-            st.session_state["nombre"] = parts[2] if len(parts) > 2 else ""
-            st.session_state["rfc"] = parts[3] if len(parts) > 3 else ""
-            return parts[1]
-    return None
+    return st.session_state.get("rol")
 
 def borrar_token():
-    if os.path.exists(TOKEN_FILE):
-        os.remove(TOKEN_FILE)
-    st.session_state.clear()
+    # Elimina solo lo relacionado con auth (no limpies todo para no romper otros estados de UI)
+    for k in ["token", "rol", "nombre", "rfc"]:
+        st.session_state.pop(k, None)
+    # Por si cacheaste datos por usuario:
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
