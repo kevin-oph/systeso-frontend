@@ -1,20 +1,34 @@
 import streamlit as st
 import requests
 import re
+import pandas as pd
+
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
-from utils import guardar_token, obtener_token, borrar_token, obtener_rol, restaurar_sesion_completa
 from cargar_excel import cargar_excel_empleados
 from verificacion import verificar_email
-import pandas as pd
-from utils import init_auth_cookies
-init_auth_cookies()
+from utils import (
+    guardar_token,
+    obtener_token,
+    borrar_token,
+    obtener_rol,
+    restaurar_sesion_completa,
+    EMAIL_REGEX,
+    PASSWORD_REGEX,
+)
 
+# --- CONFIG GLOBAL ---
+st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# -------------------------- mostrarhistorial de cargas --------------------------
+
+# -------------------------- HISTORIAL DE CARGAS --------------------------
 def mostrar_historial_cargas():
     token = obtener_token()
+    if not token:
+        st.warning("No tienes sesión activa.")
+        return
+
     headers = {"Authorization": f"Bearer {token}"}
     response = requests.get(f"{BASE_URL}/empleados/historial_cargas", headers=headers)
     if response.status_code == 200:
@@ -22,12 +36,13 @@ def mostrar_historial_cargas():
         st.markdown("### 📂 Historial de archivos Excel cargados:")
 
         if historial:
-            df = pd.DataFrame(historial)
-            df = df.rename(columns={
-                "nombre_archivo": "Nombre del archivo",
-                "fecha_carga": "Fecha y hora",
-                "usuario": "Usuario"
-            })
+            df = pd.DataFrame(historial).rename(
+                columns={
+                    "nombre_archivo": "Nombre del archivo",
+                    "fecha_carga": "Fecha y hora",
+                    "usuario": "Usuario",
+                }
+            )
             # Convertir la fecha a datetime para filtrar
             df["Fecha y hora"] = pd.to_datetime(df["Fecha y hora"])
 
@@ -59,7 +74,6 @@ def mostrar_historial_cargas():
         st.error("Error al consultar el historial de cargas.")
 
 
-
 # -------------------------- INICIALIZACIÓN DE ESTADOS --------------------------
 init_keys = [
     ("view", "login"),
@@ -82,10 +96,12 @@ for key, val in init_keys:
     if key not in st.session_state:
         st.session_state[key] = val
 
+
 # -------------------------- DETECCIÓN DE ENLACES ESPECIALES --------------------------
 params = st.query_params
 if "reset_password" in params and "token" in params:
     from reset_password import mostrar_formulario_reset
+
     mostrar_formulario_reset(params["token"])
     st.stop()
 
@@ -93,27 +109,19 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 
-# -------------------------- CSS --------------------------
-st.markdown("""
-    <style>
-    body, .stApp { background-color: #eaeaea; color: #10312B; }
-    input, select, textarea { background-color: white; color: #10312B; border-radius: 6px; padding: 0.5em; border: 1px solid #235B4E; width: 100%; }
-    label { font-weight: bold; margin-bottom: 0.2em; color: #10312B; }
-    div.stButton > button { background-color: #235B4E; color: white; border-radius: 6px; font-weight: bold; padding: 0.5em 1em; margin-top: 1em; }
-    div.stButton > button:hover { background-color: #BC955C; color: white; }
-    </style>
-""", unsafe_allow_html=True)
-
+# -------------------------- UI HEADER --------------------------
 st.image("banner-systeso.png", use_container_width=True)
 if st.session_state.get("view") == "recibos":
-    st.markdown("""
+    st.markdown(
+        """
         <div style='text-align: center; margin-top: 1.5em; margin-bottom: 2em;'>
             <h1 style='color: #10312B; font-size: 2.5em; font-weight: 800;'>📄 Sistema de Recibos de Nómina</h1>
             <p style='font-size: 1.2em; color: #235B4E;'>Ayuntamiento de Emiliano Zapata · 2025-2027</p>
         </div>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
 # -------------------------- RESTAURAR SESIÓN Y TOKEN --------------------------
 restaurar_sesion_completa()
@@ -123,7 +131,7 @@ rol_guardado = obtener_rol()
 if token and "rol" not in st.session_state:
     try:
         headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get("https://systeso-backend-production.up.railway.app/users/me", headers=headers)
+        response = requests.get(f"{BASE_URL}/users/me", headers=headers)
         if response.status_code == 200:
             data = response.json()
             st.session_state.nombre = data.get("nombre", "Empleado")
@@ -131,13 +139,14 @@ if token and "rol" not in st.session_state:
             st.session_state.view = "recibos"
         else:
             borrar_token()
-    except:
+    except Exception:
         borrar_token()
 
 # -------------------------- SESIÓN ACTIVA --------------------------
 if token:
     rol = st.session_state.get("rol", "usuario")
     nombre = st.session_state.get("nombre", "Empleado")
+
     with st.sidebar:
         st.markdown(
             f"""
@@ -145,11 +154,12 @@ if token:
                 <img src="https://api.dicebear.com/7.x/identicon/svg?seed={nombre}" style="border-radius: 50%; width: 96px; height: 96px; border: 3px solid #235B4E; box-shadow: 0 2px 8px #235b4e2a;">
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
         st.markdown("### 👤 Usuario autenticado")
         st.markdown(f"👋 Bienvenido, **{nombre}**")
-        if rol == "admin":  # Solo mostrar opciones de administrador si es admin
+
+        if rol == "admin":
             if st.button("📄 Cargar Recibos ZIP", use_container_width=True):
                 st.session_state.view = "subir_zip"
                 st.rerun()
@@ -159,15 +169,13 @@ if token:
             if st.button("📑 Historial Excel", use_container_width=True):
                 st.session_state.view = "historial_excel"
                 st.rerun()
-
         else:
             if st.button("📄 Ver Recibos", use_container_width=True):
                 st.session_state.view = "recibos"
                 st.rerun()
 
         st.markdown("###")
-        cerrar = st.button("🚪 Cerrar sesión", use_container_width=True)
-        if cerrar:
+        if st.button("🚪 Cerrar sesión", use_container_width=True):
             borrar_token()
             st.session_state.view = "login"
             st.rerun()
@@ -178,7 +186,6 @@ if token:
         cargar_excel_empleados()
     elif st.session_state.view == "historial_excel" and rol == "admin":
         mostrar_historial_cargas()
-    
     else:
         mostrar_recibos()
 
@@ -247,10 +254,7 @@ elif st.session_state.view == "login":
         if st.button("📩 Reenviar correo de verificación"):
             with st.spinner("📨 Reenviando correo..."):
                 try:
-                    response = requests.post(
-                        "https://systeso-backend-production.up.railway.app/users/reenviar_verificacion",
-                        json={"email": email}
-                    )
+                    response = requests.post(f"{BASE_URL}/users/reenviar_verificacion", json={"email": email})
                     if response.status_code == 200:
                         st.success("✅ Correo reenviado. Revisa tu bandeja de entrada.")
                         st.toast("📬 Verificación reenviada exitosamente.")
@@ -263,10 +267,7 @@ elif st.session_state.view == "login":
                     st.toast("🔌 Error de conexión.")
 
 # -------------------------- REGISTRO --------------------------
-EMAIL_REGEX = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-PASSWORD_REGEX = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"
-
-if st.session_state.view == "register":
+elif st.session_state.view == "register":
     st.subheader("📝 Registro de usuario", divider="grey")
 
     # Limpiar campos si viene de acción previa
@@ -307,14 +308,9 @@ if st.session_state.view == "register":
             for err in errores:
                 st.error(err)
         else:
-            data = {
-                "clave": clave,
-                "rfc": rfc,
-                "email": email,
-                "password": password
-            }
+            data = {"clave": clave, "rfc": rfc, "email": email, "password": password}
             with st.spinner("Registrando usuario..."):
-                response = requests.post("https://systeso-backend-production.up.railway.app/users/register", json=data)
+                response = requests.post(f"{BASE_URL}/users/register", json=data)
             if response.status_code == 201:
                 st.success("🎉 Registro exitoso. Revisa tu correo para verificar tu cuenta.")
                 st.session_state.reset_register_fields = True
@@ -324,7 +320,7 @@ if st.session_state.view == "register":
             else:
                 try:
                     error = response.json().get("detail", "Error desconocido")
-                except:
+                except Exception:
                     error = "No se pudo interpretar la respuesta del servidor."
                 st.error(f"❌ Error al registrar: {error}")
 
@@ -334,7 +330,7 @@ if st.session_state.view == "register":
         st.rerun()
 
 # -------------------------- REENVÍO MANUAL DE VERIFICACIÓN --------------------------
-if st.session_state.view == "reenviar":
+elif st.session_state.view == "reenviar":
     st.subheader("📩 Reenviar correo de verificación")
     email_reintento = st.text_input("📧 Ingresa tu correo registrado", key="reenviar_email")
     col1, col2 = st.columns([1, 1])
@@ -342,10 +338,7 @@ if st.session_state.view == "reenviar":
         if st.button("📨 Reenviar verificación"):
             with st.spinner("🔄 Enviando correo de verificación..."):
                 try:
-                    response = requests.post(
-                        "https://systeso-backend-production.up.railway.app/users/reenviar_verificacion",
-                        json={"email": email_reintento}
-                    )
+                    response = requests.post(f"{BASE_URL}/users/reenviar_verificacion", json={"email": email_reintento})
                     if response.status_code == 200:
                         st.success("✅ Se ha reenviado el correo correctamente.")
                         st.toast("📬 Verificación reenviada a tu correo.")
@@ -355,7 +348,7 @@ if st.session_state.view == "reenviar":
                     else:
                         st.error("❌ No se pudo reenviar el correo. Verifica que el correo esté registrado.")
                         st.toast("⚠️ Falló el reenvío. ¿Correo válido?")
-                except:
+                except Exception:
                     st.error("⚠️ Error de conexión con el servidor.")
                     st.toast("🔌 No se pudo contactar al backend.")
     with col2:
@@ -372,17 +365,18 @@ elif st.session_state.view == "recuperar_password":
         st.session_state.reset_email = ""
         st.session_state.reset_reset_fields = False
 
-    email_reset = st.text_input("📧 Ingresa tu correo registrado para restablecer tu contraseña", value=st.session_state.reset_email, key="reset_email")
+    email_reset = st.text_input(
+        "📧 Ingresa tu correo registrado para restablecer tu contraseña",
+        value=st.session_state.reset_email,
+        key="reset_email",
+    )
     if st.button("📨 Enviar enlace de recuperación"):
         if not email_reset:
             st.warning("Debes ingresar un correo.")
         else:
             with st.spinner("Enviando correo..."):
                 try:
-                    resp = requests.post(
-                        "https://systeso-backend-production.up.railway.app/users/solicitar_reset",
-                        json={"email": email_reset}
-                    )
+                    resp = requests.post(f"{BASE_URL}/users/solicitar_reset", json={"email": email_reset})
                     if resp.status_code == 200:
                         st.success("✅ Se ha enviado el enlace de recuperación. Revisa tu correo.")
                         st.toast("📬 Solicitud enviada.")
@@ -391,7 +385,7 @@ elif st.session_state.view == "recuperar_password":
                         st.rerun()
                     else:
                         st.error("❌ No se pudo enviar el enlace. ¿El correo está registrado?")
-                except Exception as e:
+                except Exception:
                     st.error("⚠️ No se pudo conectar al servidor.")
 
     if st.button("🔙 Volver al login"):
