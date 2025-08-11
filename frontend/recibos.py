@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import pandas as pd
 import base64
-import urllib.parse
 from streamlit_pdf_viewer import pdf_viewer
 from utils import obtener_token
 
@@ -27,13 +26,10 @@ MESES_MAP = {
 }
 
 def _extraer_mes(periodo: str) -> str:
-    """
-    Devuelve el mes normalizado para que coincida con MESES_ORDEN.
-    Ej: "01-ene.-2025 al 15-ene.-2025" -> "Ene"
-    """
+    """De '01-ene.-2025 al 15-ene.-2025' devuelve 'Ene'."""
     try:
-        fecha_inicio = periodo.split(" al ")[0]          # "01-ene.-2025"
-        _, mes_token, _ = fecha_inicio.split("-")        # "ene."
+        fecha_inicio = periodo.split(" al ")[0]
+        _, mes_token, _ = fecha_inicio.split("-")
         m = mes_token.strip().lower()
         return MESES_MAP.get(m, m.capitalize())
     except Exception:
@@ -41,8 +37,8 @@ def _extraer_mes(periodo: str) -> str:
 
 def _extraer_anio(periodo: str) -> str:
     try:
-        fecha_inicio = periodo.split(" al ")[0]          # "01-ene.-2025"
-        return fecha_inicio.split("-")[-1]               # "2025"
+        fecha_inicio = periodo.split(" al ")[0]
+        return fecha_inicio.split("-")[-1]
     except Exception:
         return "0000"
 
@@ -73,7 +69,7 @@ def mostrar_recibos():
         st.info("No hay recibos disponibles.")
         return
 
-    # 2) Filtros (Año / Mes / Período) — MISMA UI DE SIEMPRE
+    # 2) Filtros (Año / Mes / Período) — MISMA UI
     df = pd.DataFrame(recibos)
     df["anio"] = df["periodo"].apply(_extraer_anio)
     df["mes"]  = df["periodo"].apply(_extraer_mes)
@@ -89,10 +85,7 @@ def mostrar_recibos():
 
     with col_mes:
         meses_presentes = set(df.loc[df["anio"] == anio_filtro, "mes"])
-        # Ordenar usando MESES_ORDEN para que siempre se vea en orden calendario
-        meses_disp = [m for m in MESES_ORDEN if m in meses_presentes]
-        if not meses_disp:
-            meses_disp = sorted(list(meses_presentes))
+        meses_disp = [m for m in MESES_ORDEN if m in meses_presentes] or sorted(list(meses_presentes))
         mes_filtro = st.selectbox("📅 Filtrar por mes:", options=meses_disp)
 
     df_filtro = df[(df["anio"] == anio_filtro) & (df["mes"] == mes_filtro)]
@@ -110,33 +103,29 @@ def mostrar_recibos():
     if not seleccionado:
         return
 
-    # 3) Pedir el PDF (seguirá redirect 307 si viene de S3/B2)
+    # 3) Ver PDF (si hay redirect a S3/B2, embebemos la URL firmada)
     pdf_endpoint = f"https://systeso-backend-production.up.railway.app/recibos/{seleccionado['id']}/file"
     head = requests.get(pdf_endpoint, headers=headers, allow_redirects=False)
 
     col_izq, col_ctr, col_der = st.columns([1, 5, 1])
     with col_ctr:
         if head.status_code in (302, 303, 307, 308) and "location" in head.headers:
-            # Tenemos URL firmada (S3/B2)
             signed_url = head.headers["location"]
-            viewer_url = (
-                "https://mozilla.github.io/pdf.js/web/viewer.html?file="
-                + urllib.parse.quote_plus(signed_url)
-                + "#zoom=page-width"
-            )
+            # Visor nativo del navegador (con zoom/búsqueda), mismo estilo
             st.components.v1.html(
                 f"""
                 <div style="display:flex;justify-content:center;">
-                <iframe src="{viewer_url}"
-                        style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-                </iframe>
+                  <iframe
+                    src="{signed_url}#zoom=page-width"
+                    style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+                  </iframe>
                 </div>
                 """,
                 height=800,
                 scrolling=False,
             )
         else:
-            # Fallback: pedimos los bytes y usamos tu viewer actual
+            # Fallback: pedimos bytes y usamos tu viewer actual
             pdf_response = requests.get(pdf_endpoint, headers=headers, allow_redirects=True)
             if pdf_response.status_code != 200:
                 st.error("No se pudo cargar el archivo PDF.")
@@ -146,67 +135,28 @@ def mostrar_recibos():
                     "content_type": pdf_response.headers.get("content-type",""),
                     "body": pdf_response.text[:300],
                 })
-                st.stop()
+                return
 
-            content_type = pdf_response.headers.get("content-type","").lower()
-            es_pdf = "application/pdf" in content_type or pdf_response.content.startswith(b"%PDF-")
+            content_type = (pdf_response.headers.get("content-type") or "").lower()
+            es_pdf = ("application/pdf" in content_type) or pdf_response.content.startswith(b"%PDF-")
             if not es_pdf:
                 st.error("El servidor no devolvió un PDF válido.")
                 st.write({"content_type": content_type, "primeros_16_bytes": pdf_response.content[:16]})
-                st.stop()
+                return
 
             try:
                 pdf_viewer(pdf_response.content, width=900, height=1100)
             except Exception:
-                import base64
                 b64 = base64.b64encode(pdf_response.content).decode("utf-8")
                 html = f"""
                 <div style="display:flex;justify-content:center;">
-                <iframe
+                  <iframe
                     src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
                     style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-                </iframe>
+                  </iframe>
                 </div>
                 """
                 st.components.v1.html(html, height=800, scrolling=False)
-
-    # 4) Diagnóstico claro si falla (NO cambia la UI, solo muestra detalle)
-    if pdf_response.status_code != 200:
-        st.error("No se pudo cargar el archivo PDF.")
-        st.write({
-            "pdf_url": pdf_endpoint,
-            "status": pdf_response.status_code,
-            "content_type": pdf_response.headers.get("content-type",""),
-            "body": pdf_response.text[:300],
-        })
-        return
-
-    # 5) Validar que realmente sea PDF (cabecera + magic bytes)
-    content_type = pdf_response.headers.get("content-type","").lower()
-    es_pdf = "application/pdf" in content_type and pdf_response.content.startswith(b"%PDF-")
-    if not es_pdf:
-        st.error("El servidor no devolvió un PDF válido.")
-        st.write({"content_type": content_type, "primeros_16_bytes": pdf_response.content[:16]})
-        return
-
-    # 6) Mostrar PDF con el viewer (con fallback a iframe)
-    col_izq, col_ctr, col_der = st.columns([1, 5, 1])
-    with col_ctr:
-        try:
-            # Ajusta estos dos números a tu gusto
-            pdf_viewer(pdf_response.content, width=900, height=1100)
-        except Exception:
-            # Fallback a iframe con zoom a “page-width”
-            b64 = base64.b64encode(pdf_response.content).decode("utf-8")
-            html = f"""
-            <div style="display:flex;justify-content:center;">
-            <iframe
-                src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
-                style="width:100%;max-width:920px;height:85vh;border:none;"
-            ></iframe>
-            </div>
-            """
-            st.components.v1.html(html, height=800, scrolling=False)
 
 def subir_zip():
     token = obtener_token()
@@ -220,29 +170,23 @@ def subir_zip():
     st.markdown("Aquí podrás subir tus recibos quincenalmente para mandárselos a cada uno de los trabajadores del ayuntamiento.")
 
     archivo = st.file_uploader("📁 Selecciona archivo ZIP con recibos", type="zip")
-
     if not archivo:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.info(" Selecciona un archivo ZIP para comenzar.")
         return
 
-    # Info del archivo (por si hay problemas de tamaño)
     st.caption(f"Nombre: {archivo.name} · Tamaño: {len(archivo.getvalue())/1024/1024:.2f} MB")
 
     if st.button("🚀 Subir ZIP", use_container_width=True):
         with st.spinner("⏳ Subiendo y procesando..."):
-            files = {
-                "archivo": (archivo.name, archivo.getvalue(), "application/zip")
-            }
-
+            files = {"archivo": (archivo.name, archivo.getvalue(), "application/zip")}
             try:
-                # timeout generoso para uploads
                 resp = requests.post(
                     "https://systeso-backend-production.up.railway.app/recibos/upload_zip",
                     headers=headers,
                     files=files,
-                    timeout=120,           # súbelo si tu ZIP es muy grande o la red lenta
+                    timeout=120,
                     allow_redirects=True
                 )
             except requests.RequestException as e:
@@ -250,9 +194,7 @@ def subir_zip():
                 st.write({"exception": e.__class__.__name__, "detail": str(e)})
                 return
 
-        # Si no es 200, mostramos diagnóstico detallado (sin depender de JSON)
         if resp.status_code != 200:
-            detail = None
             try:
                 detail = resp.json()
             except Exception:
@@ -261,15 +203,12 @@ def subir_zip():
                     "headers": dict(resp.headers),
                     "body_snippet": resp.text[:500],
                 }
-
             st.error("❌ Error al subir ZIP")
             st.write(detail)
             return
 
-        # OK
         data = resp.json()
         st.success("✅ ZIP procesado correctamente")
         st.json(data)
-        # pista rápida para ver si ‘reparados’ arregló rutas antiguas
         if isinstance(data, dict) and "reparados" in data:
             st.caption(f"Reparados: {data.get('reparados')} · Nuevos: {data.get('nuevo')} · Duplicados: {data.get('duplicados')}")
