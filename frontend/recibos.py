@@ -6,115 +6,110 @@ from streamlit_pdf_viewer import pdf_viewer
 from utils import obtener_token
 
 
+MESES_ORDEN = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+               "Jul", "Ago", "Sept", "Oct", "Nov", "Dic"]
+
+def _extraer_mes(periodo: str) -> str:
+    try:
+        fecha_inicio = periodo.split(" al ")[0]  # "01-ene.-2025"
+        _, mes, _ = fecha_inicio.split("-")
+        return mes.strip().lower()  # ej. "ene."
+    except Exception:
+        return "otro"
+
+def _extraer_anio(periodo: str) -> str:
+    try:
+        fecha_inicio = periodo.split(" al ")[0]
+        return fecha_inicio.split("-")[-1]  # ej. "2025"
+    except Exception:
+        return "0000"
+
 def mostrar_recibos():
     token = obtener_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get("https://systeso-backend-production.up.railway.app/recibos/", headers=headers)
-
-    if response.status_code != 200:
-        st.error("Error al obtener recibos")
+    if not token:
+        st.error("No hay token. Inicia sesión.")
         return
 
-    recibos = response.json()
+    headers = {"Authorization": f"Bearer {token}"}
 
-    if not recibos:
+    # 1) Traer lista de recibos
+    resp = requests.get("https://systeso-backend-production.up.railway.app/recibos/", headers=headers)
+    if resp.status_code != 200:
+        st.error("Error al obtener recibos")
+        st.write({"status": resp.status_code, "body": resp.text[:300]})
+        return
+
+    data = resp.json()
+    if not data:
         st.info("No hay recibos disponibles.")
         return
+
+    # 2) Filtros (Año / Mes / Período)
+    df = pd.DataFrame(data)
+    df["anio"] = df["periodo"].apply(_extraer_anio)
+    df["mes"]  = df["periodo"].apply(_extraer_mes)
 
     st.subheader("📁 Consulta tus Recibos de Nómina")
     st.markdown("Filtra por año, mes y selecciona un recibo quincenal:")
 
-    # Procesar y normalizar datos
-    def formatear_nombre(periodo):
-        try:
-            fecha_inicio = periodo.split(" al ")[0]
-            dia, mes, anio = fecha_inicio.split("-")
-            mes_nombre = {
-                "01": "Enero", "02": "Febrero", "03": "Marzo",
-                "04": "Abril", "05": "Mayo", "06": "Junio",
-                "07": "Julio", "08": "Agosto", "09": "Septiembre",
-                "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
-            }.get(mes, mes)
-            quincena = "1er Quincena" if int(dia) <= 15 else "2da Quincena"
-            return f"Recibo de Nómina, {mes_nombre} {anio} ({quincena})"
-        except:
-            return periodo
+    col_anio, col_mes, col_periodo = st.columns([1, 1, 2])
 
-    def extraer_mes(periodo):
-        try:
-            fecha_inicio = periodo.split(" al ")[0]
-            _, mes, _ = fecha_inicio.split("-")
-            return {
-                "01": "Enero", "02": "Febrero", "03": "Marzo",
-                "04": "Abril", "05": "Mayo", "06": "Junio",
-                "07": "Julio", "08": "Agosto", "09": "Septiembre",
-                "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
-            }.get(mes, mes)
-        except:
-            return "Otro"
+    with col_anio:
+        anios = sorted(df["anio"].unique(), reverse=True)
+        anio_filtro = st.selectbox("📅 Filtrar por año:", options=anios)
 
-    def extraer_anio(periodo):
-        try:
-            fecha_inicio = periodo.split(" al ")[0]
-            _, _, anio = fecha_inicio.split("-")
-            return anio
-        except:
-            return "Otro"
+    with col_mes:
+        meses_disp = [m for m in MESES_ORDEN if m in set(df.loc[df["anio"]==anio_filtro, "mes"])]
+        if not meses_disp:
+            meses_disp = sorted(df.loc[df["anio"]==anio_filtro, "mes"].unique())
+        mes_filtro = st.selectbox("📅 Filtrar por mes:", options=meses_disp)
 
-    df = pd.DataFrame(recibos)
-    df["quincena_legible"] = df["periodo"].apply(formatear_nombre)
-    df["mes"] = df["periodo"].apply(extraer_mes)
-    df["anio"] = df["periodo"].apply(extraer_anio)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        anio_filtro = st.selectbox("📅 Filtrar por año:", options=["2025", "2026", "2027"])
-    with col2:
-        mes_filtro = st.selectbox("📆 Filtrar por mes:", options=sorted(df["mes"].unique()))
-
-    df_filtrado = df[(df["anio"] == anio_filtro) & (df["mes"] == mes_filtro)]
-
-    if df_filtrado.empty:
-        st.warning("No hay recibos disponibles para la combinación seleccionada.")
+    df_filtro = df[(df["anio"]==anio_filtro) & (df["mes"]==mes_filtro)]
+    if df_filtro.empty:
+        st.warning("No hay recibos para ese filtro.")
         return
 
-    with col3:
-        seleccion = st.selectbox("🗂️ Elige un periodo:", options=df_filtrado.index,
-                                 format_func=lambda idx: df_filtrado.loc[idx, "quincena_legible"])
+    with col_periodo:
+        seleccionado = st.selectbox(
+            "📁 Elige un periodo:",
+            options=df_filtro.to_dict("records"),
+            format_func=lambda r: f"{r['periodo']} — {r['nombre_archivo']}",
+        )
 
-    selected = df_filtrado.loc[seleccion]
+    if not seleccionado:
+        return
 
-    # Obtener PDF
-    pdf_response = requests.get(
-        f"https://systeso-backend-production.up.railway.app/recibos/{selected['id']}/file",
-        headers=headers
-    )
+    # 3) Pedir el PDF (seguirá redirect 307 si viene de S3)
+    pdf_url = f"https://systeso-backend-production.up.railway.app/recibos/{seleccionado['id']}/file"
+    pdf_response = requests.get(pdf_url, headers=headers, allow_redirects=True)
 
+    # 4) Diagnóstico si falla
     if pdf_response.status_code != 200:
         st.error("No se pudo cargar el archivo PDF.")
+        st.write({
+            "pdf_url": pdf_url,
+            "status": pdf_response.status_code,
+            "content_type": pdf_response.headers.get("content-type",""),
+            "body": pdf_response.text[:300],
+        })
         return
 
-    st.markdown(f"### {selected['quincena_legible']}")
+    # 5) Validar PDF y mostrar
+    content_type = pdf_response.headers.get("content-type","").lower()
+    es_pdf = "application/pdf" in content_type and pdf_response.content.startswith(b"%PDF-")
+    if not es_pdf:
+        st.error("El servidor no devolvió un PDF válido.")
+        st.write({"content_type": content_type, "primeros_16_bytes": pdf_response.content[:16]})
+        return
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col3:
-        st.download_button(
-            label="📅 Descargar recibo",
-            data=pdf_response.content,
-            file_name=selected["nombre_archivo"],
-            mime="application/pdf"
-        )
-
-    # Vista previa PDF
-    with st.container():
+    try:
+        pdf_viewer(pdf_response.content, width=1000, height=900)
+    except Exception:
+        b64 = base64.b64encode(pdf_response.content).decode("utf-8")
         st.markdown(
-            f"""
-            <iframe src="data:application/pdf;base64,{base64.b64encode(pdf_response.content).decode('utf-8')}"
-                    width="100%" height="1000px" style="border:none;"></iframe>
-            """,
+            f"<iframe src='data:application/pdf;base64,{b64}' width='100%' height='900' style='border:none;'></iframe>",
             unsafe_allow_html=True
         )
-
    
 
 def subir_zip():

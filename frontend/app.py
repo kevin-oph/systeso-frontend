@@ -7,10 +7,10 @@ from utils import guardar_token, obtener_token, borrar_token, obtener_rol, resta
 from cargar_excel import cargar_excel_empleados
 from verificacion import verificar_email
 import pandas as pd
-from utils import init_auth_cookies
-init_auth_cookies()
+
 
 BASE_URL = "https://systeso-backend-production.up.railway.app"
+st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 
 # -------------------------- mostrarhistorial de cargas --------------------------
 def mostrar_historial_cargas():
@@ -93,7 +93,7 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
+
 
 # -------------------------- CSS --------------------------
 st.markdown("""
