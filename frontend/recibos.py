@@ -144,6 +144,10 @@ def mostrar_recibos():
 
 def subir_zip():
     token = obtener_token()
+    if not token:
+        st.error("No hay token. Inicia sesión.")
+        return
+
     headers = {"Authorization": f"Bearer {token}"}
 
     st.subheader("📤 Carga de recibos quincenales")
@@ -151,27 +155,55 @@ def subir_zip():
 
     archivo = st.file_uploader("📁 Selecciona archivo ZIP con recibos", type="zip")
 
-    if archivo:
-        if st.button("🚀 Subir ZIP", use_container_width=True):
-            with st.spinner("⏳ Procesando archivo..."):
-                files = {"archivo": (archivo.name, archivo.getvalue())}
-                response = requests.post(
-                    "https://systeso-backend-production.up.railway.app/recibos/upload_zip",
-                    headers=headers, files=files
-                )
-
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                if response.status_code == 200:
-                    st.success("✅ ZIP procesado correctamente")
-                    st.json(response.json())
-                else:
-                    try:
-                        error = response.json().get("detail", "Error desconocido al subir ZIP")
-                    except Exception:
-                        error = "Error al conectar con el servidor."
-                    st.error(f"❌ {error}")
-    else:
+    if not archivo:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.info(" Selecciona un archivo ZIP para comenzar.")
+        return
+
+    # Info del archivo (por si hay problemas de tamaño)
+    st.caption(f"Nombre: {archivo.name} · Tamaño: {len(archivo.getvalue())/1024/1024:.2f} MB")
+
+    if st.button("🚀 Subir ZIP", use_container_width=True):
+        with st.spinner("⏳ Subiendo y procesando..."):
+            files = {
+                "archivo": (archivo.name, archivo.getvalue(), "application/zip")
+            }
+
+            try:
+                # timeout generoso para uploads
+                resp = requests.post(
+                    "https://systeso-backend-production.up.railway.app/recibos/upload_zip",
+                    headers=headers,
+                    files=files,
+                    timeout=120,           # súbelo si tu ZIP es muy grande o la red lenta
+                    allow_redirects=True
+                )
+            except requests.RequestException as e:
+                st.error("❌ No se pudo conectar con el backend.")
+                st.write({"exception": e.__class__.__name__, "detail": str(e)})
+                return
+
+        # Si no es 200, mostramos diagnóstico detallado (sin depender de JSON)
+        if resp.status_code != 200:
+            detail = None
+            try:
+                detail = resp.json()
+            except Exception:
+                detail = {
+                    "status": resp.status_code,
+                    "headers": dict(resp.headers),
+                    "body_snippet": resp.text[:500],
+                }
+
+            st.error("❌ Error al subir ZIP")
+            st.write(detail)
+            return
+
+        # OK
+        data = resp.json()
+        st.success("✅ ZIP procesado correctamente")
+        st.json(data)
+        # pista rápida para ver si ‘reparados’ arregló rutas antiguas
+        if isinstance(data, dict) and "reparados" in data:
+            st.caption(f"Reparados: {data.get('reparados')} · Nuevos: {data.get('nuevo')} · Duplicados: {data.get('duplicados')}")
