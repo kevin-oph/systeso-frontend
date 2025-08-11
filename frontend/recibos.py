@@ -2,14 +2,14 @@ import streamlit as st
 import requests
 import pandas as pd
 import base64
-from streamlit_pdf_viewer import pdf_viewer
+from streamlit_pdf_viewer import pdf_viewer  # lo mantenemos como fallback
 from utils import obtener_token
 
-# Etiquetas tal como las quieres ver en la UI
+# === Meses tal y como los muestras en la UI ===
 MESES_ORDEN = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
                "Jul", "Ago", "Sept", "Oct", "Nov", "Dic"]
 
-# Normalización desde los textos del periodo (que vienen como "01-ene.-2025")
+# Normalización desde los textos del periodo (vienen como "01-ene.-2025")
 MESES_MAP = {
     "ene.": "Ene", "ene": "Ene",
     "feb.": "Feb", "feb": "Feb",
@@ -42,6 +42,53 @@ def _extraer_anio(periodo: str) -> str:
     except Exception:
         return "0000"
 
+# ---------- Helper: descarga bytes del PDF siguiendo el 307 del backend ----------
+def _descargar_pdf_bytes(pdf_endpoint: str, headers: dict):
+    """
+    Devuelve (bytes_pdf, error_dict|None).
+    Sigue redirects (307 a S3/B2) y valida que sea PDF real.
+    """
+    try:
+        r = requests.get(pdf_endpoint, headers=headers, allow_redirects=True, timeout=60)
+    except Exception as e:
+        return None, {"exception": type(e).__name__, "detail": str(e)}
+
+    if r.status_code != 200:
+        return None, {
+            "status": r.status_code,
+            "content_type": r.headers.get("content-type", ""),
+            "body_snippet": r.text[:300],
+        }
+
+    content_type = (r.headers.get("content-type") or "").lower()
+    if not ("application/pdf" in content_type or r.content.startswith(b"%PDF-")):
+        return None, {
+            "error": "not_pdf",
+            "content_type": content_type,
+            "first_bytes": r.content[:16],
+        }
+
+    return r.content, None
+
+# ---------- Visor PDF centrado (data URL) ----------
+def _mostrar_pdf_centrado(pdf_bytes: bytes, ancho_max_px: int = 1200, alto_vh: int = 88):
+    """
+    Embebe el PDF como data URL para evitar bloqueos por X-Frame-Options/CORS.
+    Mantiene zoom a 'page-width' y lo centra con un ancho máximo controlado.
+    """
+    b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    html = f"""
+    <div style="display:flex;justify-content:center;">
+      <iframe
+        src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
+        style="width:100%;max-width:{ancho_max_px}px;height:{alto_vh}vh;border:none;
+               border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+      </iframe>
+    </div>
+    """
+    st.components.v1.html(html, height=int(alto_vh*9), scrolling=False)
+
+# =========================== PANTALLA RECIBOS ===========================
 def mostrar_recibos():
     token = obtener_token()
     if not token:
@@ -69,7 +116,7 @@ def mostrar_recibos():
         st.info("No hay recibos disponibles.")
         return
 
-    # 2) Filtros (Año / Mes / Período) — MISMA UI
+    # 2) Filtros (Año / Mes / Período) — sin cambios visuales
     df = pd.DataFrame(recibos)
     df["anio"] = df["periodo"].apply(_extraer_anio)
     df["mes"]  = df["periodo"].apply(_extraer_mes)
@@ -103,61 +150,25 @@ def mostrar_recibos():
     if not seleccionado:
         return
 
-    # 3) Ver PDF (si hay redirect a S3/B2, embebemos la URL firmada)
+    # 3) Descargar PDF (bytes) y mostrarlo como data URL (evita bloqueos del navegador)
     pdf_endpoint = f"https://systeso-backend-production.up.railway.app/recibos/{seleccionado['id']}/file"
-    head = requests.get(pdf_endpoint, headers=headers, allow_redirects=False)
+    pdf_bytes, err = _descargar_pdf_bytes(pdf_endpoint, headers)
 
-    col_izq, col_ctr, col_der = st.columns([1, 5, 1])
-    with col_ctr:
-        if head.status_code in (302, 303, 307, 308) and "location" in head.headers:
-            signed_url = head.headers["location"]
-            # Visor nativo del navegador (con zoom/búsqueda), mismo estilo
-            st.components.v1.html(
-                f"""
-                <div style="display:flex;justify-content:center;">
-                  <iframe
-                    src="{signed_url}#zoom=page-width"
-                    style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-                  </iframe>
-                </div>
-                """,
-                height=800,
-                scrolling=False,
-            )
-        else:
-            # Fallback: pedimos bytes y usamos tu viewer actual
-            pdf_response = requests.get(pdf_endpoint, headers=headers, allow_redirects=True)
-            if pdf_response.status_code != 200:
-                st.error("No se pudo cargar el archivo PDF.")
-                st.write({
-                    "pdf_url": pdf_endpoint,
-                    "status": pdf_response.status_code,
-                    "content_type": pdf_response.headers.get("content-type",""),
-                    "body": pdf_response.text[:300],
-                })
-                return
+    if err:
+        st.error("No se pudo cargar el archivo PDF.")
+        st.write({"endpoint": pdf_endpoint, **err})
+        return
 
-            content_type = (pdf_response.headers.get("content-type") or "").lower()
-            es_pdf = ("application/pdf" in content_type) or pdf_response.content.startswith(b"%PDF-")
-            if not es_pdf:
-                st.error("El servidor no devolvió un PDF válido.")
-                st.write({"content_type": content_type, "primeros_16_bytes": pdf_response.content[:16]})
-                return
+    # Ancho tipo “hoja carta grande” y centrado (puedes subir a 1280 si gustas)
+    _mostrar_pdf_centrado(pdf_bytes, ancho_max_px=1200, alto_vh=88)
 
-            try:
-                pdf_viewer(pdf_response.content, width=900, height=1100)
-            except Exception:
-                b64 = base64.b64encode(pdf_response.content).decode("utf-8")
-                html = f"""
-                <div style="display:flex;justify-content:center;">
-                  <iframe
-                    src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
-                    style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-                  </iframe>
-                </div>
-                """
-                st.components.v1.html(html, height=800, scrolling=False)
+    # (Opcional) Si prefieres el componente viewer de Streamlit en lugar del iframe:
+    # try:
+    #     pdf_viewer(pdf_bytes, width=1100, height=1100)
+    # except Exception:
+    #     _mostrar_pdf_centrado(pdf_bytes, ancho_max_px=1200, alto_vh=88)
 
+# =========================== SUBIDA DE ZIP (admin) ===========================
 def subir_zip():
     token = obtener_token()
     if not token:
