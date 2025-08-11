@@ -133,14 +133,23 @@ def mostrar_recibos():
         return
 
     # 6) Mostrar PDF con el viewer (con fallback a iframe)
-    try:
-        pdf_viewer(pdf_response.content, width=1000, height=900)
-    except Exception:
-        b64 = base64.b64encode(pdf_response.content).decode("utf-8")
-        st.markdown(
-            f"<iframe src='data:application/pdf;base64,{b64}' width='100%' height='900' style='border:none;'></iframe>",
-            unsafe_allow_html=True
-        )
+    col_izq, col_ctr, col_der = st.columns([1, 5, 1])
+    with col_ctr:
+        try:
+            # Ajusta estos dos números a tu gusto
+            pdf_viewer(pdf_response.content, width=900, height=1100)
+        except Exception:
+            # Fallback a iframe con zoom a “page-width”
+            b64 = base64.b64encode(pdf_response.content).decode("utf-8")
+            html = f"""
+            <div style="display:flex;justify-content:center;">
+            <iframe
+                src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
+                style="width:100%;max-width:920px;height:85vh;border:none;"
+            ></iframe>
+            </div>
+            """
+            st.components.v1.html(html, height=800, scrolling=False)
 
 def subir_zip():
     token = obtener_token()
