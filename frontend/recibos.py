@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import base64
+import urllib.parse
 from streamlit_pdf_viewer import pdf_viewer
 from utils import obtener_token
 
@@ -110,14 +111,70 @@ def mostrar_recibos():
         return
 
     # 3) Pedir el PDF (seguirá redirect 307 si viene de S3/B2)
-    pdf_url = f"https://systeso-backend-production.up.railway.app/recibos/{seleccionado['id']}/file"
-    pdf_response = requests.get(pdf_url, headers=headers, allow_redirects=True)
+    pdf_endpoint = f"https://systeso-backend-production.up.railway.app/recibos/{seleccionado['id']}/file"
+    head = requests.get(pdf_endpoint, headers=headers, allow_redirects=False)
+
+    col_izq, col_ctr, col_der = st.columns([1, 5, 1])
+    with col_ctr:
+        if head.status_code in (302, 303, 307, 308) and "location" in head.headers:
+            # Tenemos URL firmada (S3/B2)
+            signed_url = head.headers["location"]
+            viewer_url = (
+                "https://mozilla.github.io/pdf.js/web/viewer.html?file="
+                + urllib.parse.quote_plus(signed_url)
+                + "#zoom=page-width"
+            )
+            st.components.v1.html(
+                f"""
+                <div style="display:flex;justify-content:center;">
+                <iframe src="{viewer_url}"
+                        style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+                </iframe>
+                </div>
+                """,
+                height=800,
+                scrolling=False,
+            )
+        else:
+            # Fallback: pedimos los bytes y usamos tu viewer actual
+            pdf_response = requests.get(pdf_endpoint, headers=headers, allow_redirects=True)
+            if pdf_response.status_code != 200:
+                st.error("No se pudo cargar el archivo PDF.")
+                st.write({
+                    "pdf_url": pdf_endpoint,
+                    "status": pdf_response.status_code,
+                    "content_type": pdf_response.headers.get("content-type",""),
+                    "body": pdf_response.text[:300],
+                })
+                st.stop()
+
+            content_type = pdf_response.headers.get("content-type","").lower()
+            es_pdf = "application/pdf" in content_type or pdf_response.content.startswith(b"%PDF-")
+            if not es_pdf:
+                st.error("El servidor no devolvió un PDF válido.")
+                st.write({"content_type": content_type, "primeros_16_bytes": pdf_response.content[:16]})
+                st.stop()
+
+            try:
+                pdf_viewer(pdf_response.content, width=900, height=1100)
+            except Exception:
+                import base64
+                b64 = base64.b64encode(pdf_response.content).decode("utf-8")
+                html = f"""
+                <div style="display:flex;justify-content:center;">
+                <iframe
+                    src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
+                    style="width:100%;max-width:980px;height:85vh;border:none;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+                </iframe>
+                </div>
+                """
+                st.components.v1.html(html, height=800, scrolling=False)
 
     # 4) Diagnóstico claro si falla (NO cambia la UI, solo muestra detalle)
     if pdf_response.status_code != 200:
         st.error("No se pudo cargar el archivo PDF.")
         st.write({
-            "pdf_url": pdf_url,
+            "pdf_url": pdf_endpoint,
             "status": pdf_response.status_code,
             "content_type": pdf_response.headers.get("content-type",""),
             "body": pdf_response.text[:300],
