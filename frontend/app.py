@@ -1,16 +1,12 @@
-import streamlit as st
-import requests
 import re
+import requests
 import pandas as pd
+import streamlit as st
 
-from auth import login_user, register_user
+from auth import login_user, register_user  # si no usas register_user, no pasa nada
 from recibos import mostrar_recibos, subir_zip
 from cargar_excel import cargar_excel_empleados
 from verificacion import verificar_email
-<<<<<<< HEAD
-import pandas as pd
-
-=======
 from utils import (
     guardar_token,
     obtener_token,
@@ -20,13 +16,10 @@ from utils import (
     EMAIL_REGEX,
     PASSWORD_REGEX,
 )
->>>>>>> 8211d8368335bf8e26de08f76d84ec508a9d20c8
 
 # --- CONFIG GLOBAL ---
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
-st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
-
 
 # -------------------------- HISTORIAL DE CARGAS --------------------------
 def mostrar_historial_cargas():
@@ -79,7 +72,6 @@ def mostrar_historial_cargas():
     else:
         st.error("Error al consultar el historial de cargas.")
 
-
 # -------------------------- INICIALIZACIÓN DE ESTADOS --------------------------
 init_keys = [
     ("view", "login"),
@@ -102,24 +94,21 @@ for key, val in init_keys:
     if key not in st.session_state:
         st.session_state[key] = val
 
-
 # -------------------------- DETECCIÓN DE ENLACES ESPECIALES --------------------------
 params = st.query_params
 if "reset_password" in params and "token" in params:
     from reset_password import mostrar_formulario_reset
-
     mostrar_formulario_reset(params["token"])
     st.stop()
 
+# Verificación de correo por token
 if "token" in params:
     verificar_email()
     st.stop()
 
-<<<<<<< HEAD
-
-
 # -------------------------- CSS --------------------------
-st.markdown("""
+st.markdown(
+    """
     <style>
     body, .stApp { background-color: #eaeaea; color: #10312B; }
     input, select, textarea { background-color: white; color: #10312B; border-radius: 6px; padding: 0.5em; border: 1px solid #235B4E; width: 100%; }
@@ -127,9 +116,9 @@ st.markdown("""
     div.stButton > button { background-color: #235B4E; color: white; border-radius: 6px; font-weight: bold; padding: 0.5em 1em; margin-top: 1em; }
     div.stButton > button:hover { background-color: #BC955C; color: white; }
     </style>
-""", unsafe_allow_html=True)
-=======
->>>>>>> 8211d8368335bf8e26de08f76d84ec508a9d20c8
+    """,
+    unsafe_allow_html=True,
+)
 
 # -------------------------- UI HEADER --------------------------
 st.image("banner-systeso.png", use_container_width=True)
