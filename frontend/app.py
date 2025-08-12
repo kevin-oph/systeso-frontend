@@ -36,19 +36,7 @@ boot_cookies_once()
 # ------------------------------------------------------------
 # BOOT COOKIES: una sola instancia + get_all() una sola vez
 # ------------------------------------------------------------
-if "cookie_manager" not in st.session_state:
-    st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
-cm = st.session_state["cookie_manager"]
-
-# Lectura única de cookies en este render. En el primer ciclo puede ser None.
-cookies = cm.get_all(key="boot")
-if cookies is None:
-    # Primer ciclo tras carga → el componente aún no está hidratado
-    st.stop()
-
-# Cachear cookies para el resto del render (utils leerá de aquí sin volver a llamar get_all)
-st.session_state["_cookies_cache"] = cookies
 
 # ------------------------------------------------------------
 # Enlaces especiales (reset/verificación) — se permiten sin sesión
