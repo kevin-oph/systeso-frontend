@@ -25,21 +25,20 @@ if "cookie_manager" not in st.session_state:
 cm = st.session_state["cookie_manager"]
 
 # Usa una key dinámica cuando hiciste logout para romper el cache del componente
-boot_key = st.session_state.get("cm_boot_key", "boot_static")
+boot_key = st.session_state.get("cm_boot_key", "boot1")
 cookies = cm.get_all(key=boot_key)
 if cookies is None:
+    st.write("🔄 Restaurando sesión...")
     st.stop()
-st.session_state["_cookies_cache"] = cookies
 
-ensure_ls_boot()
+st.session_state["_cookies_cache"] = cookies
 
 # 1) Restaurar sesión desde localStorage (y si no, desde cookie)
 restaurar_sesion_completa()
 
 # 2) Token/rol ya deberían estar cargados
 token = obtener_token()
-if token and st.session_state.get("view") in (None, "", "login"):
-    st.session_state["view"] = "recibos"
+
 rol_guardado = obtener_rol()
 
 # Links especiales (verificación / reset)
