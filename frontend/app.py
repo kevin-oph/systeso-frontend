@@ -1,12 +1,21 @@
 # app.py (inicio)
 import re
 import time
-import json                       # <-- necesario
+import json
 import requests
 import pandas as pd
 import streamlit as st
 import extra_streamlit_components as stx
-from utils import COOKIE_NAME, borrar_token, obtener_token, guardar_token, EMAIL_REGEX, PASSWORD_REGEX, jwt_exp_unix, is_jwt_expired     # <-- toma el nombre del cookie desde utils
+
+from utils import (
+    COOKIE_NAME,
+    borrar_token,
+    guardar_token,
+    EMAIL_REGEX,
+    PASSWORD_REGEX,
+    jwt_exp_unix,
+    is_jwt_expired,
+)
 
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
@@ -29,7 +38,7 @@ if cookies is None:
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# MUY IMPORTANTE: popular el cache para que utils.obtener_token() / obtener_rol() funcionen si los usa otra parte
+# MUY IMPORTANTE: popular el cache para que utils.* funcione donde aún se use
 st.session_state["_cookies_cache"] = cookies
 
 # Hidrata la sesión desde el cookie si hace falta
@@ -48,7 +57,7 @@ if raw:
         # cookie corrupto -> fuerza login (pero NO borres cookie aquí)
         st.session_state["view"] = "login"
 else:
-    # No hay cookie: si quedó algo en memoria, limpialo para evitar falsos positivos
+    # No hay cookie: limpiar memoria y mandar a login
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
     st.session_state["view"] = "login"
@@ -56,6 +65,12 @@ else:
 # Usa SIEMPRE el token/rol VIVOS en session_state para rutear
 token        = st.session_state.get("token", "")
 rol_guardado = st.session_state.get("rol", "")
+
+# ---- Chequeo TEMPRANO de expiración del JWT (crítico para persistencia) ----
+if token and is_jwt_expired(token):
+    borrar_token()
+    st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
+    st.stop()
 
 # ------------------- ENLACES ESPECIALES -------------------
 params = st.query_params
@@ -75,6 +90,7 @@ if token:
         st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
     except Exception:
         pass
+
 # ------------------- ESTILOS -------------------
 st.markdown("""
 <style>
@@ -120,30 +136,26 @@ for k, v in init_keys:
         st.session_state[k] = v
 
 # ------------------- COMPLETAR DATOS (suave) -------------------
-# No te saco por fallos de red/5xx. Solo cierro si el JWT está vencido.
-if token and "rol" not in st.session_state:
-    if is_jwt_expired(token):
-        borrar_token()
-        st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
-    else:
-        try:
-            headers = {"Authorization": f"Bearer {token}"}
-            r = requests.get(f"{BASE_URL}/users/me", headers=headers, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                st.session_state.nombre = data.get("nombre", "Empleado")
-                st.session_state.rol = data.get("rol", rol_guardado or "usuario")  # ← aquí usa el respaldo
-                st.session_state.view = st.session_state.get("view", "recibos")
-            elif r.status_code in (401, 403):
-                borrar_token()
-                st.warning("Tu sesión expiró o no es válida. Inicia sesión nuevamente.")
-        except requests.RequestException:
-            # si no hay backend, conserva el rol de respaldo
-            st.session_state.rol = st.session_state.get("rol", rol_guardado or "usuario")
+# Solo cierro si /users/me responde 401/403 (o si ya expiró, que lo chequeamos arriba).
+if token and not st.session_state.get("nombre"):
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(f"{BASE_URL}/users/me", headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            st.session_state.nombre = data.get("nombre", "Empleado")
+            st.session_state.rol = data.get("rol", rol_guardado or "usuario")
+            st.session_state.view = st.session_state.get("view", "recibos")
+        elif r.status_code in (401, 403):
+            borrar_token()
+            st.warning("Tu sesión expiró o no es válida. Inicia sesión nuevamente.")
+        # otros códigos → mantén la sesión
+    except requests.RequestException:
+        pass
 
 # ------------------- HISTORIAL DE CARGAS (ADMIN) -------------------
 def mostrar_historial_cargas():
-    tok = obtener_token()
+    tok = st.session_state.get("token")
     if not tok:
         st.warning("No tienes sesión activa.")
         return
