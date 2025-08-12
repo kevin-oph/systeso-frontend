@@ -39,47 +39,63 @@ if cookies is None:
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# MUY IMPORTANTE: popular el cache para que utils.* funcione donde aún se use
+# Popular cache para utilidades que aún lean de aquí
 st.session_state["_cookies_cache"] = cookies
 
-# Hidrata la sesión desde el cookie si hace falta
-raw = cookies.get(COOKIE_NAME)
-if raw:
-    # El componente suele URL-encodar el valor. Probamos crudo y decodificado.
-    payload = None
-    for candidate in (raw, unquote(raw)):
+# --- Helper robusto para parsear el cookie ---
+def _parse_cookie_value(raw):
+    """Devuelve dict con el payload del cookie o None si no se pudo parsear."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, (bytes, bytearray)):
         try:
-            payload = json.loads(candidate)
-            break
+            raw = raw.decode("utf-8", "ignore")
         except Exception:
-            pass
+            return None
+    if not isinstance(raw, str):
+        return None
 
-    if payload:
-        if not st.session_state.get("token"):
-            st.session_state["token"]  = payload.get("token", "")
-            st.session_state["rol"]    = payload.get("rol", "")
-            st.session_state["nombre"] = payload.get("nombre", "Empleado")
-            st.session_state["rfc"]    = payload.get("rfc", "")
-        if st.session_state.get("view") in (None, "", "login"):
-            st.session_state["view"] = "recibos"
-    else:
-        # cookie presente pero ilegible → fuerza login (no borres el cookie aquí)
-        st.session_state["view"] = "login"
+    candidates = [raw]
+    # URL-encoded (%7B...%7D)
+    try:
+        candidates.append(unquote(raw))
+    except Exception:
+        pass
+    # Entrecomillado ("{...}")
+    if raw.startswith('"') and raw.endswith('"'):
+        candidates.append(raw[1:-1])
+
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except Exception:
+            continue
+    return None
+
+# Hidratar sesión desde cookie (si procede)
+data = _parse_cookie_value(cookies.get(COOKIE_NAME))
+
+if data:
+    if not st.session_state.get("token"):
+        st.session_state["token"]  = data.get("token", "")
+        st.session_state["rol"]    = data.get("rol", "")
+        st.session_state["nombre"] = data.get("nombre", "Empleado")
+        st.session_state["rfc"]    = data.get("rfc", "")
+    if st.session_state.get("view") in (None, "", "login"):
+        st.session_state["view"] = "recibos"
 else:
-    # No hay cookie: limpiar memoria y mandar a login
+    # Sin cookie válido → limpiar y forzar login
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
     st.session_state["view"] = "login"
 
-# Usa SIEMPRE el token/rol VIVOS en session_state para rutear
+# Usa SIEMPRE el token/rol vivos en session_state
 token        = st.session_state.get("token", "")
-if token and is_jwt_expired(token):
-    borrar_token()
-    st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
-    st.stop()
 rol_guardado = st.session_state.get("rol", "")
 
-# ---- Chequeo TEMPRANO de expiración del JWT (crítico para persistencia) ----
+# Guard temprano: si el JWT venció, salir ordenadamente
 if token and is_jwt_expired(token):
     borrar_token()
     st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
