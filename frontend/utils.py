@@ -86,6 +86,10 @@ def restaurar_sesion_completa():
     st.session_state["rol"] = data.get("rol", "")
     st.session_state["nombre"] = data.get("nombre", "Empleado")
     st.session_state["rfc"] = data.get("rfc", "")
+    
+    # 👇 NUEVO: si la vista está vacía o en login, manda directo a recibos
+    if st.session_state.get("view") in (None, "", "login"):
+        st.session_state["view"] = "recibos"
 
 def obtener_token():
     """
