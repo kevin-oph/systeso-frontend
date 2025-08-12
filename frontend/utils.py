@@ -27,24 +27,28 @@ def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS):
 
 def _get_cookie(name: str):
     """
-    Lee el cookie usando get_all() con key ÚNICA
-    para evitar colisiones de clave en el mismo render.
+    Lee el cookie desde la CACHÉ cargada por ensure_cookies_ready().
+    No vuelve a llamar a get_all() (evita claves duplicadas en el mismo render).
     """
-    mgr = _cm()
-    # 👇 usar otra key ÚNICA distinta a la de ensure_cookies_ready
-    all_cookies = mgr.get_all(key="cm_read")
+    cookies = st.session_state.get("_cookies_cache")
 
-    if all_cookies is None and not st.session_state.get("_cookie_hydration_rerun_done"):
-        st.session_state["_cookie_hydration_rerun_done"] = True
-        st.rerun()
+    # Si por alguna razón no hay caché (ej. se llamó sin pasar por ensure_cookies_ready),
+    # hacemos una sola carga de emergencia y la cacheamos.
+    if cookies is None:
+        cm = _cm()
+        cookies = cm.get_all(key="cm_boot_fallback")
+        if cookies is None and not st.session_state.get("_cookie_hydration_rerun_done"):
+            st.session_state["_cookie_hydration_rerun_done"] = True
+            st.rerun()
+            return None
+        st.session_state["_cookies_cache"] = cookies
 
-    if not all_cookies:
+    if not cookies:
         return None
 
-    raw = all_cookies.get(name)
+    raw = cookies.get(name)
     if not raw:
         return None
-
     try:
         return json.loads(raw)
     except Exception:
@@ -148,16 +152,20 @@ def borrar_token():
 
 def ensure_cookies_ready() -> None:
     """
-    Bloquea el PRIMER render hasta que el CookieManager esté hidratado.
-    Evita que la app 'vea' que no hay cookie y te mande al login.
+    Hidrata CookieManager UNA sola vez por render y cachea los cookies.
+    Evita renders con cookies=None y elimina colisiones de keys.
     """
     if "_cookie_manager" not in st.session_state:
         st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
     cm = st.session_state["_cookie_manager"]
-    # 👇 usar una key ÚNICA para esta llamada
+
+    # Llamada ÚNICA por render (key estable SOLO aquí)
     cookies = cm.get_all(key="cm_boot")
 
     if cookies is None:
         st.empty().write("🔄 Restaurando sesión...")
-        st.stop()
+        st.stop()  # el siguiente ciclo ya tendrá cookies
+
+    # Cachear para este render (y futuras lecturas en este mismo ciclo)
+    st.session_state["_cookies_cache"] = cookies
