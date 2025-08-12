@@ -13,6 +13,7 @@ from utils import (
     borrar_token,
     obtener_rol,
     restaurar_sesion_completa,
+    ensure_cookies_ready,
     EMAIL_REGEX,
     PASSWORD_REGEX,
 )
@@ -134,6 +135,7 @@ if st.session_state.get("view") == "recibos":
     )
 
 # -------------------------- RESTAURAR SESIÓN Y TOKEN --------------------------
+ensure_cookies_ready()
 restaurar_sesion_completa()
 token = obtener_token()
 rol_guardado = obtener_rol()

@@ -133,3 +133,20 @@ def borrar_token():
         if k in st.session_state:
             del st.session_state[k]
     st.rerun()
+
+def ensure_cookies_ready() -> None:
+    """
+    Bloquea el PRIMER render hasta que el CookieManager esté hidratado.
+    Evita que la app 'vea' que no hay cookie y te mande al login.
+    """
+    # Instancia única y estable
+    if "_cookie_manager" not in st.session_state:
+        st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm")
+
+    cm = st.session_state["_cookie_manager"]
+    cookies = cm.get_all()
+
+    # En el primer ciclo devuelve None. Cortamos aquí y dejamos que Streamlit rerun.
+    if cookies is None:
+        st.empty().write("🔄 Restaurando sesión...")
+        st.stop()  # el próximo ciclo ya estará hidratado
