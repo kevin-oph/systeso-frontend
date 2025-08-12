@@ -32,22 +32,29 @@ from utils import (
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# ------------------- BOOT COOKIES -------------------
-# Instancia única del CookieManager (clave estable)
+# Instancia única de CookieManager
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
-# Hidratar cookies (corta el primer render si aún no están) y cachearlas
+# 1) Hidratar cookies y cachearlas (corta 1er render si aún no están)
 ensure_cookies_ready()
 
-# Restaurar sesión desde cookie si hace falta
+# 2) Restaurar sesión desde cookie si hace falta
 restaurar_sesion_completa()
 
-# Si ya hay token pero la vista quedó en login, mandamos a recibos
+# 2.5) AUTH GUARD (NUEVO)
+cookie_keys = list(st.session_state.get("_cookies_cache", {}).keys())
+cookie_has_auth = "systeso_auth" in cookie_keys
+tok_now = st.session_state.get("token", None)
+if cookie_has_auth and not tok_now:
+    restaurar_sesion_completa()
+    st.stop()
+
+# 3) Si ya hay token pero vista es login, ir a recibos
 if st.session_state.get("token") and st.session_state.get("view") == "login":
     st.session_state["view"] = "recibos"
 
-# Token “vivo” para este render (¡no lo asumas como global, re-llámalo si lo necesitas!)
+# A partir de aquí ya puedes leer tu token con seguridad
 token = obtener_token()
 rol_guardado = obtener_rol()
 
@@ -117,7 +124,6 @@ for k, v in init_keys:
 # ------------------- COMPLETAR DATOS (suave) -------------------
 # No te saco por fallos de red/5xx. Solo cierro si el JWT está vencido.
 if token and "rol" not in st.session_state:
-    # Si caducó, fuera
     if is_jwt_expired(token):
         borrar_token()
         st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
@@ -128,21 +134,14 @@ if token and "rol" not in st.session_state:
             if r.status_code == 200:
                 data = r.json()
                 st.session_state.nombre = data.get("nombre", "Empleado")
-                st.session_state.rol = data.get("rol", rol_guardado or "usuario")
+                st.session_state.rol = data.get("rol", rol_guardado or "usuario")  # ← aquí usa el respaldo
                 st.session_state.view = st.session_state.get("view", "recibos")
             elif r.status_code in (401, 403):
-                # Si el servidor dice no autorizado pero el JWT NO está vencido,
-                # mantenemos la sesión (puede ser race/latencia). Si quieres ser estricto,
-                # descomenta la siguiente línea:
-                # borrar_token()
-                # st.warning("Tu sesión no es válida. Inicia sesión nuevamente.")
-                pass
-            else:
-                # 5xx/otros: mantén la sesión
-                pass
+                borrar_token()
+                st.warning("Tu sesión expiró o no es válida. Inicia sesión nuevamente.")
         except requests.RequestException:
-            # Red caída: mantén la sesión
-            pass
+            # si no hay backend, conserva el rol de respaldo
+            st.session_state.rol = st.session_state.get("rol", rol_guardado or "usuario")
 
 # ------------------- HISTORIAL DE CARGAS (ADMIN) -------------------
 def mostrar_historial_cargas():
