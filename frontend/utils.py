@@ -122,36 +122,71 @@ def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | No
 
 def borrar_token():
     """
-    Cierra sesión:
-    - Borra el cookie con el mismo path con el que fue creado (/)
-    - Limpia el cache local de cookies y los datos de sesión
-    - Cambia la key usada por get_all() para forzar que el componente no devuelva cache
-    - Vuelve a la vista 'login' y hace rerun
+    Cierra sesión de forma robusta:
+    - Borra/vence el cookie con distintos métodos.
+    - Limpia cache local de cookies y datos de sesión.
+    - Cambia la key de boot para romper cache del componente.
+    - Vuelve a 'login' y rerun.
     """
     cm = st.session_state.get("cookie_manager")
+
+    # 1) Intento directo: delete con path "/"
     if cm:
         try:
             cm.delete(COOKIE_NAME, path="/")
         except Exception:
             pass
 
-    # Limpia cache y session_state
+        # 2) Vencer el cookie: expirar en el pasado (por si delete no coincide en atributos)
+        try:
+            cm.set(
+                COOKIE_NAME,
+                "",
+                expires_at=datetime.utcnow() - timedelta(days=1),
+                path="/",
+                secure=True,     # OK aunque no esté siempre en https; si falla, no pasa nada
+            )
+        except Exception:
+            pass
+
+    # 3) Plan C: borrar con JS en varias variantes (Strict/Lax/None; con/ sin Secure)
+    st.components.v1.html("""
+    <script>
+      (function(){
+        var names = ['systeso_auth'];
+        var paths = ['/', ''];
+        var attrs = [
+          '', 'SameSite=Lax', 'SameSite=Strict', 'SameSite=None; Secure'
+        ];
+        for (var n of names){
+          for (var p of paths){
+            for (var a of attrs){
+              try {
+                document.cookie = n + '=; Max-Age=0; Path=' + p + (a ? '; ' + a : '');
+              } catch(e) {}
+            }
+          }
+        }
+      })();
+    </script>
+    """, height=0)
+
+    # 4) Limpiar cache y session_state
     st.session_state.pop("_cookies_cache", None)
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
 
-    # Fuerza que la próxima lectura de cookies use otra key (rompe cache interno)
+    # 5) Forzar que el próximo get_all() use otra key (rompe cache del componente)
     st.session_state["cm_boot_key"] = f"boot_{int(time.time()*1000)}"
 
-    # manda a login
+    # 6) Volver a login y limpiar query params
     st.session_state["view"] = "login"
-
-    # Limpia query params por si hay token/verificación en URL
     try:
         st.query_params.clear()
     except Exception:
         pass
 
+    # 7) Rerun
     st.rerun()
 
 def restaurar_sesion_completa():
