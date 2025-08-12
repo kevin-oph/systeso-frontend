@@ -36,6 +36,8 @@ restaurar_sesion_completa()
 
 # 2) Token/rol ya deberían estar cargados
 token = obtener_token()
+if token and st.session_state.get("view") in (None, "", "login"):
+    st.session_state["view"] = "recibos"
 rol_guardado = obtener_rol()
 
 # Links especiales (verificación / reset)

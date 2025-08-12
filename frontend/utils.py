@@ -158,6 +158,9 @@ def restaurar_sesion_completa() -> None:
     Si no hay cookie válido, asegura vista=login y deja la sesión vacía.
     """
     if st.session_state.get("token"):
+        
+        if st.session_state.get("view") in (None, "", "login"):
+            st.session_state["view"] = "recibos"
         return
 
     data = _cookie_get(COOKIE_NAME)
