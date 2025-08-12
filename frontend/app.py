@@ -20,7 +20,8 @@ from utils import (
     restaurar_sesion_completa,
     EMAIL_REGEX,
     PASSWORD_REGEX,
-    is_jwt_expired,  # utils tiene helpers para exp del JWT
+    is_jwt_expired, # utils tiene helpers para exp del JWT
+    boot_cookies_once,
 )
 
 # ------------------------------------------------------------
@@ -28,6 +29,9 @@ from utils import (
 # ------------------------------------------------------------
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
+
+# 1) Hidratar cookies UNA vez por render
+boot_cookies_once()
 
 # ------------------------------------------------------------
 # BOOT COOKIES: una sola instancia + get_all() una sola vez
