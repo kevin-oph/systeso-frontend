@@ -3,7 +3,7 @@ import streamlit as st
 import requests
 import re
 import pandas as pd
-
+import extra_streamlit_components as stx
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
 from cargar_excel import cargar_excel_empleados
@@ -16,7 +16,6 @@ from utils import (
     borrar_token,
     obtener_rol,
     restaurar_sesion_completa,
-    ensure_cookies_ready,
     EMAIL_REGEX,
     PASSWORD_REGEX,
 )
