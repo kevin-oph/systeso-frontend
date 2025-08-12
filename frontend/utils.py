@@ -13,30 +13,31 @@ COOKIE_DAYS = 7                # duración del login
 
 def _cm():
     """
-    Un único CookieManager con key estable.
-    (Los componentes de Streamlit necesitan key fija para no 'recrearse' en cada rerun).
+    Devuelve la instancia ÚNICA creada en app.py.
+    Si no existe (llamada fuera de orden), crea una de emergencia.
     """
+    cm = st.session_state.get("cookie_manager")
+    if cm is not None:
+        return cm
+    # fallback (no ideal, pero evita crash si se llama antes del boot)
     if "_cookie_manager" not in st.session_state:
-        st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm")
+        st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm_fallback")
     return st.session_state["_cookie_manager"]
 
 def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS):
-    """Guarda un cookie con expiración en 'days' días."""
     expires_at = datetime.utcnow() + timedelta(days=days)
     _cm().set(name, json.dumps(value), expires_at=expires_at)
 
 def _get_cookie(name: str):
     """
-    Lee el cookie desde la CACHÉ cargada por ensure_cookies_ready().
-    No vuelve a llamar a get_all() (evita claves duplicadas en el mismo render).
+    Lee el cookie desde la CACHÉ que llenamos en app.py.
+    NO llama get_all() de nuevo (evita claves duplicadas por render).
     """
     cookies = st.session_state.get("_cookies_cache")
-
-    # Si por alguna razón no hay caché (ej. se llamó sin pasar por ensure_cookies_ready),
-    # hacemos una sola carga de emergencia y la cacheamos.
     if cookies is None:
+        # emergencia: intentar una sola lectura con otra key única
         cm = _cm()
-        cookies = cm.get_all(key="cm_boot_fallback")
+        cookies = cm.get_all(key="fallback_read")
         if cookies is None and not st.session_state.get("_cookie_hydration_rerun_done"):
             st.session_state["_cookie_hydration_rerun_done"] = True
             st.rerun()
@@ -55,9 +56,12 @@ def _get_cookie(name: str):
         return None
 
 
-
-def _delete_cookie(name: str):
-    _cm().delete(name)
+def borrar_token():
+    _cm().delete(COOKIE_NAME)
+    for k in ("token", "rol", "nombre", "rfc", "_cookies_cache"):
+        if k in st.session_state:
+            del st.session_state[k]
+    st.rerun()
 
 def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | None = None):
     """
@@ -143,7 +147,7 @@ def borrar_token():
     """
     Logout: borra cookie + limpia session_state.
     """
-    _delete_cookie(COOKIE_NAME)
+    borrar_token(COOKIE_NAME)
     # Limpia todos los valores de sesión relevantes
     for k in ("token", "rol", "nombre", "rfc", "_cookie_manager", "_cookie_hydration_rerun_done"):
         if k in st.session_state:

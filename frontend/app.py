@@ -21,13 +21,30 @@ from utils import (
     PASSWORD_REGEX,
 )
 
+
+# --- BOOT COOKIES: crear una sola instancia y leer get_all() solo una vez ---
+if "cookie_manager" not in st.session_state:
+    # Instancia ÚNICA del cookie manager (key estable)
+    st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
+
+cm = st.session_state["cookie_manager"]
+
+# get_all UNA sola vez por render; clave única "boot"
+cookies = cm.get_all(key="boot")
+
+# Primer ciclo tras carga: get_all() devuelve None -> cortamos este render
+if cookies is None:
+    st.stop()
+
+# Cachear cookies para el resto del render (y que utils.py los use sin volver a llamar)
+st.session_state["_cookies_cache"] = cookies
+
+
 # --- CONFIG GLOBAL ---
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
 # ========== BLOQUE CRÍTICO: COOKIES Y SESIÓN ==========
-# 1) Espera a que el CookieManager se haya hidratado (evita ciclo 0 sin cookies)
-ensure_cookies_ready()
 
 # 2) Restaura sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
 restaurar_sesion_completa()
