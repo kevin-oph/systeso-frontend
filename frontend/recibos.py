@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import base64
-from streamlit_pdf_viewer import pdf_viewer  # lo mantenemos como fallback
+from streamlit_pdf_viewer import pdf_viewer  # lo dejamos como primer intento
 from utils import obtener_token
 
 # === Meses tal y como los muestras en la UI ===
@@ -70,25 +70,36 @@ def _descargar_pdf_bytes(pdf_endpoint: str, headers: dict):
 
     return r.content, None
 
-# ---------- Visor PDF centrado (data URL) ----------
+# ---------- Visor PDF centrado (sin sandbox de components) ----------
 def _mostrar_pdf_centrado(pdf_bytes: bytes, ancho_max_px: int = 1200, alto_vh: int = 88):
     """
-    Embebe el PDF como data URL para evitar bloqueos por X-Frame-Options/CORS.
-    Mantiene zoom a 'page-width' y lo centra con un ancho máximo controlado.
+    Embebe el PDF como data URL (data:application/pdf;base64,...) usando st.markdown
+    para evitar bloqueos del sandbox de components o X-Frame-Options externos.
     """
     b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    html = f"""
-    <div style="display:flex;justify-content:center;">
-      <iframe
-        src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
-        style="width:100%;max-width:{ancho_max_px}px;height:{alto_vh}vh;border:none;
-               border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-      </iframe>
-    </div>
-    """
-    st.components.v1.html(html, height=int(alto_vh*9), scrolling=False)
 
-# =========================== PANTALLA RECIBOS ===========================
+    # Intento 1: usar el componente pdf_viewer (PDF.js). Si falla, caemos a <iframe>.
+    try:
+        # Más ancho que antes; ajusta height si quieres más/menos alto visible
+        pdf_viewer(pdf_bytes, width=ancho_max_px, height=1200)
+        return
+    except Exception:
+        pass
+
+    # Intento 2: iframe con data URL (navegador nativo, zoom page-width)
+    st.markdown(
+        f"""
+        <div style="display:flex;justify-content:center;">
+          <iframe
+            src="data:application/pdf;base64,{b64}#page=1&zoom=page-width"
+            style="width:100%;max-width:{ancho_max_px}px;height:{alto_vh}vh;border:none;
+                   border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+          </iframe>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def mostrar_recibos():
     token = obtener_token()
     if not token:
@@ -116,7 +127,7 @@ def mostrar_recibos():
         st.info("No hay recibos disponibles.")
         return
 
-    # 2) Filtros (Año / Mes / Período) — sin cambios visuales
+    # 2) Filtros (Año / Mes / Período) — SIN CAMBIOS VISUALES
     df = pd.DataFrame(recibos)
     df["anio"] = df["periodo"].apply(_extraer_anio)
     df["mes"]  = df["periodo"].apply(_extraer_mes)
@@ -150,7 +161,7 @@ def mostrar_recibos():
     if not seleccionado:
         return
 
-    # 3) Descargar PDF (bytes) y mostrarlo como data URL (evita bloqueos del navegador)
+    # 3) Descargar bytes del PDF y mostrarlo centrado y ancho grande
     pdf_endpoint = f"https://systeso-backend-production.up.railway.app/recibos/{seleccionado['id']}/file"
     pdf_bytes, err = _descargar_pdf_bytes(pdf_endpoint, headers)
 
@@ -159,16 +170,11 @@ def mostrar_recibos():
         st.write({"endpoint": pdf_endpoint, **err})
         return
 
-    # Ancho tipo “hoja carta grande” y centrado (puedes subir a 1280 si gustas)
-    _mostrar_pdf_centrado(pdf_bytes, ancho_max_px=1200, alto_vh=88)
+    # Mantiene tu layout: centrado entre columnas, sólo el visor más ancho.
+    col_izq, col_ctr, col_der = st.columns([1, 5, 1])
+    with col_ctr:
+        _mostrar_pdf_centrado(pdf_bytes, ancho_max_px=1200, alto_vh=88)
 
-    # (Opcional) Si prefieres el componente viewer de Streamlit en lugar del iframe:
-    # try:
-    #     pdf_viewer(pdf_bytes, width=1100, height=1100)
-    # except Exception:
-    #     _mostrar_pdf_centrado(pdf_bytes, ancho_max_px=1200, alto_vh=88)
-
-# =========================== SUBIDA DE ZIP (admin) ===========================
 def subir_zip():
     token = obtener_token()
     if not token:
