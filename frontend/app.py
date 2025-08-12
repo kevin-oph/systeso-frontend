@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import streamlit as st
 import extra_streamlit_components as stx
-from utils import COOKIE_NAME, borrar_token, obtener_token, guardar_token, EMAIL_REGEX, PASSWORD_REGEX     # <-- toma el nombre del cookie desde utils
+from utils import COOKIE_NAME, borrar_token, obtener_token, guardar_token, EMAIL_REGEX, PASSWORD_REGEX, jwt_exp_unix, is_jwt_expired     # <-- toma el nombre del cookie desde utils
 
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
@@ -18,18 +18,21 @@ from reset_password import mostrar_formulario_reset
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# Instancia única de CookieManager con key estable
+# Instancia única del CookieManager (key estable)
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 cm = st.session_state["cookie_manager"]
 
-# Leer cookies UNA sola vez por render; el primer ciclo puede ser None -> cortamos
+# Lee cookies UNA sola vez por render (el primer ciclo puede ser None)
 cookies = cm.get_all(key="boot")
 if cookies is None:
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# Si hay cookie válido y no hemos cargado la sesión en memoria, hidratar sesión
+# MUY IMPORTANTE: popular el cache para que utils.obtener_token() / obtener_rol() funcionen si los usa otra parte
+st.session_state["_cookies_cache"] = cookies
+
+# Hidrata la sesión desde el cookie si hace falta
 raw = cookies.get(COOKIE_NAME)
 if raw:
     try:
@@ -42,16 +45,16 @@ if raw:
         if st.session_state.get("view") in (None, "", "login"):
             st.session_state["view"] = "recibos"
     except Exception:
+        # cookie corrupto -> fuerza login (pero NO borres cookie aquí)
         st.session_state["view"] = "login"
-
-# Si NO hay cookie pero en memoria sí quedó algo, fuerza logout consistente
-if not raw and st.session_state.get("token"):
+else:
+    # No hay cookie: si quedó algo en memoria, limpialo para evitar falsos positivos
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
     st.session_state["view"] = "login"
 
-# ⬇️ A PARTIR DE AQUÍ usa SIEMPRE el token “vivo” del session_state
-token = st.session_state.get("token", "")
+# Usa SIEMPRE el token/rol VIVOS en session_state para rutear
+token        = st.session_state.get("token", "")
 rol_guardado = st.session_state.get("rol", "")
 
 # ------------------- ENLACES ESPECIALES -------------------
@@ -63,17 +66,15 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-# ------------------- (Opcional) DIAGNÓSTICO -------------------
-st.caption(f"cookie_cache_keys: {list(cookies.keys())}")  # usamos 'cookies' que ya tienes
+# ------------------- (opc) Diagnóstico rápido -------------------
+st.caption(f"cookie_cache_keys: {list(cookies.keys())}")
 st.caption(f"has_token_in_state: {bool(token)}")
 st.caption(f"view: {st.session_state.get('view', 'login')}")
 if token:
     try:
-        from utils import is_jwt_expired, jwt_exp_unix
         st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
     except Exception:
         pass
-
 # ------------------- ESTILOS -------------------
 st.markdown("""
 <style>
