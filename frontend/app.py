@@ -6,6 +6,7 @@ import requests
 import pandas as pd
 import streamlit as st
 import extra_streamlit_components as stx
+from urllib.parse import unquote
 
 from utils import (
     COOKIE_NAME,
@@ -44,17 +45,25 @@ st.session_state["_cookies_cache"] = cookies
 # Hidrata la sesión desde el cookie si hace falta
 raw = cookies.get(COOKIE_NAME)
 if raw:
-    try:
-        data = json.loads(raw)
+    # El componente suele URL-encodar el valor. Probamos crudo y decodificado.
+    payload = None
+    for candidate in (raw, unquote(raw)):
+        try:
+            payload = json.loads(candidate)
+            break
+        except Exception:
+            pass
+
+    if payload:
         if not st.session_state.get("token"):
-            st.session_state["token"]  = data.get("token", "")
-            st.session_state["rol"]    = data.get("rol", "")
-            st.session_state["nombre"] = data.get("nombre", "Empleado")
-            st.session_state["rfc"]    = data.get("rfc", "")
+            st.session_state["token"]  = payload.get("token", "")
+            st.session_state["rol"]    = payload.get("rol", "")
+            st.session_state["nombre"] = payload.get("nombre", "Empleado")
+            st.session_state["rfc"]    = payload.get("rfc", "")
         if st.session_state.get("view") in (None, "", "login"):
             st.session_state["view"] = "recibos"
-    except Exception:
-        # cookie corrupto -> fuerza login (pero NO borres cookie aquí)
+    else:
+        # cookie presente pero ilegible → fuerza login (no borres el cookie aquí)
         st.session_state["view"] = "login"
 else:
     # No hay cookie: limpiar memoria y mandar a login
@@ -64,6 +73,10 @@ else:
 
 # Usa SIEMPRE el token/rol VIVOS en session_state para rutear
 token        = st.session_state.get("token", "")
+if token and is_jwt_expired(token):
+    borrar_token()
+    st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
+    st.stop()
 rol_guardado = st.session_state.get("rol", "")
 
 # ---- Chequeo TEMPRANO de expiración del JWT (crítico para persistencia) ----
