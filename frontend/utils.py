@@ -27,14 +27,13 @@ def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS):
 
 def _get_cookie(name: str):
     """
-    Lee el cookie usando get_all() para evitar carreras donde get(name) aún
-    devuelve None tras la hidratación inicial.
-    Si el componente todavía no está listo, hacemos un único rerun.
+    Lee el cookie usando get_all() con key ÚNICA
+    para evitar colisiones de clave en el mismo render.
     """
     mgr = _cm()
-    all_cookies = mgr.get_all()
+    # 👇 usar otra key ÚNICA distinta a la de ensure_cookies_ready
+    all_cookies = mgr.get_all(key="cm_read")
 
-    # Aún sin hidratar → hace un solo rerun
     if all_cookies is None and not st.session_state.get("_cookie_hydration_rerun_done"):
         st.session_state["_cookie_hydration_rerun_done"] = True
         st.rerun()
@@ -50,6 +49,7 @@ def _get_cookie(name: str):
         return json.loads(raw)
     except Exception:
         return None
+
 
 
 def _delete_cookie(name: str):
@@ -151,14 +151,13 @@ def ensure_cookies_ready() -> None:
     Bloquea el PRIMER render hasta que el CookieManager esté hidratado.
     Evita que la app 'vea' que no hay cookie y te mande al login.
     """
-    # Instancia única y estable
     if "_cookie_manager" not in st.session_state:
         st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
     cm = st.session_state["_cookie_manager"]
-    cookies = cm.get_all()
+    # 👇 usar una key ÚNICA para esta llamada
+    cookies = cm.get_all(key="cm_boot")
 
-    # En el primer ciclo devuelve None. Cortamos aquí y dejamos que Streamlit rerun.
     if cookies is None:
         st.empty().write("🔄 Restaurando sesión...")
-        st.stop()  # el próximo ciclo ya estará hidratado
+        st.stop()
