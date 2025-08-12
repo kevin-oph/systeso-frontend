@@ -1,10 +1,12 @@
-# app.py
+# app.py (inicio)
 import re
 import time
+import json                       # <-- necesario
 import requests
 import pandas as pd
 import streamlit as st
 import extra_streamlit_components as stx
+from utils import COOKIE_NAME, borrar_token, obtener_token, guardar_token, EMAIL_REGEX, PASSWORD_REGEX     # <-- toma el nombre del cookie desde utils
 
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
@@ -12,51 +14,45 @@ from cargar_excel import cargar_excel_empleados
 from verificacion import verificar_email
 from reset_password import mostrar_formulario_reset
 
-from utils import (
-    # boot & sesión
-    ensure_cookies_ready,
-    restaurar_sesion_completa,
-    guardar_token,
-    obtener_token,
-    obtener_rol,
-    borrar_token,
-    # validaciones
-    EMAIL_REGEX,
-    PASSWORD_REGEX,
-    # diagnóstico JWT
-    is_jwt_expired,
-    jwt_exp_unix,
-)
-
 # ------------------- CONFIG -------------------
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# Instancia única de CookieManager
+# Instancia única de CookieManager con key estable
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
+cm = st.session_state["cookie_manager"]
 
-# 1) Hidratar cookies y cachearlas (corta 1er render si aún no están)
-ensure_cookies_ready()
-
-# 2) Restaurar sesión desde cookie si hace falta
-restaurar_sesion_completa()
-
-# 2.5) AUTH GUARD (NUEVO)
-cookie_keys = list(st.session_state.get("_cookies_cache", {}).keys())
-cookie_has_auth = "systeso_auth" in cookie_keys
-tok_now = st.session_state.get("token", None)
-if cookie_has_auth and not tok_now:
-    restaurar_sesion_completa()
+# Leer cookies UNA sola vez por render; el primer ciclo puede ser None -> cortamos
+cookies = cm.get_all(key="boot")
+if cookies is None:
+    st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# 3) Si ya hay token pero vista es login, ir a recibos
-if st.session_state.get("token") and st.session_state.get("view") == "login":
-    st.session_state["view"] = "recibos"
+# Si hay cookie válido y no hemos cargado la sesión en memoria, hidratar sesión
+raw = cookies.get(COOKIE_NAME)
+if raw:
+    try:
+        data = json.loads(raw)
+        if not st.session_state.get("token"):
+            st.session_state["token"]  = data.get("token", "")
+            st.session_state["rol"]    = data.get("rol", "")
+            st.session_state["nombre"] = data.get("nombre", "Empleado")
+            st.session_state["rfc"]    = data.get("rfc", "")
+        if st.session_state.get("view") in (None, "", "login"):
+            st.session_state["view"] = "recibos"
+    except Exception:
+        st.session_state["view"] = "login"
 
-# A partir de aquí ya puedes leer tu token con seguridad
-token = obtener_token()
-rol_guardado = obtener_rol()
+# Si NO hay cookie pero en memoria sí quedó algo, fuerza logout consistente
+if not raw and st.session_state.get("token"):
+    for k in ("token", "rol", "nombre", "rfc"):
+        st.session_state.pop(k, None)
+    st.session_state["view"] = "login"
+
+# ⬇️ A PARTIR DE AQUÍ usa SIEMPRE el token “vivo” del session_state
+token = st.session_state.get("token", "")
+rol_guardado = st.session_state.get("rol", "")
 
 # ------------------- ENLACES ESPECIALES -------------------
 params = st.query_params
@@ -68,11 +64,12 @@ if "token" in params:
     st.stop()
 
 # ------------------- (Opcional) DIAGNÓSTICO -------------------
-st.caption(f"cookie_cache_keys: {list(st.session_state.get('_cookies_cache', {}).keys())}")
+st.caption(f"cookie_cache_keys: {list(cookies.keys())}")  # usamos 'cookies' que ya tienes
 st.caption(f"has_token_in_state: {bool(token)}")
 st.caption(f"view: {st.session_state.get('view', 'login')}")
 if token:
     try:
+        from utils import is_jwt_expired, jwt_exp_unix
         st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
     except Exception:
         pass
