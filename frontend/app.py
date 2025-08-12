@@ -13,15 +13,16 @@ from verificacion import verificar_email
 from reset_password import mostrar_formulario_reset
 
 from utils import (
+    boot_cookies_once,
+    restaurar_sesion_completa,
     guardar_token,
     obtener_token,
     borrar_token,
     obtener_rol,
-    restaurar_sesion_completa,
     EMAIL_REGEX,
     PASSWORD_REGEX,
     is_jwt_expired, # utils tiene helpers para exp del JWT
-    boot_cookies_once,
+    
 )
 
 # ------------------------------------------------------------
@@ -37,6 +38,17 @@ boot_cookies_once()
 # Restaurar sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
 # ------------------------------------------------------------
 restaurar_sesion_completa()
+
+st.caption(f"cookie_cache_keys: {list(st.session_state.get('_cookies_cache', {}).keys())}")
+st.caption(f"has_token_in_state: {bool(st.session_state.get('token'))}")
+st.caption(f"view: {st.session_state.get('view')}")
+
+# (opcional) estado del JWT
+from utils import is_jwt_expired, jwt_exp_unix
+tok = obtener_token()
+if tok:
+    import time
+    st.caption(f"jwt exp: {jwt_exp_unix(tok)} | now: {int(time.time())} | expired?: {is_jwt_expired(tok)}")
 
 # Leer token/rol ya restaurados
 token = obtener_token()
