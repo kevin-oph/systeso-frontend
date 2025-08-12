@@ -1,12 +1,10 @@
 # utils.py
 import json
 import time
-import base64
 from datetime import datetime, timedelta
 
 import streamlit as st
 import extra_streamlit_components as stx
-from streamlit_js_eval import streamlit_js_eval
 
 EMAIL_REGEX = r"^[\w\.-]+@[\w\.-]+\.\w+$"
 PASSWORD_REGEX = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"
@@ -14,90 +12,41 @@ PASSWORD_REGEX = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"
 COOKIE_NAME = "systeso_auth"
 COOKIE_DAYS = 7
 
-# =========================================================
-# LocalStorage helpers
-# =========================================================
-def _ls_get(key: str):
-    """Lee localStorage. En el primer render puede devolver None."""
-    try:
-        return streamlit_js_eval(
-            js_expressions=f"window.localStorage.getItem('{key}')",
-            key="ls_get_boot",
-            want_output=True,
-        )
-    except Exception:
-        return None
 
-def _ls_set(key: str, obj: dict):
-    """Escribe en localStorage (vía streamlit_js_eval)."""
-    try:
-        payload = json.dumps(obj)
-        streamlit_js_eval(
-            js_expressions=f"window.localStorage.setItem('{key}', {json.dumps(payload)})",
-            key="ls_set_save",
-            want_output=False,
-        )
-    except Exception:
-        pass
-
-def _ls_set_fallback_js(key: str, obj: dict):
-    """Segundo intento: inyecta <script> que guarda en localStorage y también un cookie JS."""
-    payload = json.dumps(obj)
-    max_age = COOKIE_DAYS * 24 * 3600
-    st.components.v1.html(
-        f"""
-        <script>
-          try {{
-            localStorage.setItem('{key}', {json.dumps(payload)});
-          }} catch (e) {{}}
-          try {{
-            document.cookie = '{COOKIE_NAME}=' + encodeURIComponent({json.dumps(payload)}) +
-                              '; Max-Age={max_age}; Path=/; SameSite=Strict; Secure';
-          }} catch (e) {{}}
-        </script>
-        """,
-        height=0,
-    )
-
-def _ls_del(key: str):
-    try:
-        streamlit_js_eval(
-            js_expressions=f"window.localStorage.removeItem('{key}')",
-            key="ls_del",
-            want_output=False,
-        )
-    except Exception:
-        pass
-
-# =========================================================
-# Cookie helpers (respaldo)
-# =========================================================
-def _cookie_manager():
+# ------------- Cookie manager (una sola instancia) -------------
+def _cm():
+    # Si ya fue creado en app.py, úsalo
     if "cookie_manager" in st.session_state:
         return st.session_state["cookie_manager"]
+    # Fallback para evitar crashes si se llama fuera de orden
     if "_cookie_manager" not in st.session_state:
         st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm_fallback")
     return st.session_state["_cookie_manager"]
 
+
 def _cookie_set(name: str, value: dict, days: int = COOKIE_DAYS):
+    """Crea/actualiza el cookie con atributos adecuados."""
     expires_at = datetime.utcnow() + timedelta(days=days)
     try:
-        _cookie_manager().set(
+        _cm().set(
             name,
             json.dumps(value),
             expires_at=expires_at,
-            path="/",
-            secure=True,   # en Railway es https
+            path="/",      # visible en toda la app
+            secure=True,   # en Railway vas por HTTPS
         )
     except TypeError:
-        _cookie_manager().set(name, json.dumps(value), expires_at=expires_at, path="/")
+        # versiones antiguas de la librería no aceptan 'secure'
+        _cm().set(name, json.dumps(value), expires_at=expires_at, path="/")
 
-def _cookie_get_all():
-    # Solo se llena una vez por render en app.py
+
+def _cookie_get_all_cached():
+    """Leemos del caché que llenas en app.py para evitar colisiones de keys."""
     return st.session_state.get("_cookies_cache")
 
+
 def _cookie_get(name: str):
-    cookies = _cookie_get_all()
+    cookies = _cookie_get_all_cached()
     if not cookies:
         return None
     raw = cookies.get(name)
@@ -108,19 +57,17 @@ def _cookie_get(name: str):
     except Exception:
         return None
 
+
 def _cookie_del(name: str):
     try:
-        _cookie_manager().delete(name, path="/")
+        _cm().delete(name, path="/")
     except Exception:
         pass
 
-# =========================================================
-# API pública
-# =========================================================
+
+# ---------------- API pública de sesión ----------------
 def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | None = None):
-    """
-    Guarda token + datos en localStorage (robusto) y cookie (respaldo), y en session_state.
-    """
+    """Guarda token + datos en cookie y session_state."""
     payload = {
         "token": token,
         "rol": rol,
@@ -128,73 +75,68 @@ def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | No
         "rfc": rfc or "",
     }
 
-    # 1) localStorage por dos vías (eval + fallback JS)
-    _ls_set(COOKIE_NAME, payload)
-    _ls_set_fallback_js(COOKIE_NAME, payload)
-
-    # 2) Cookie de respaldo
     _cookie_set(COOKIE_NAME, payload, days=COOKIE_DAYS)
 
-    # 3) Memoria inmediata
+    # En memoria para uso inmediato
     st.session_state["token"] = token
     st.session_state["rol"] = rol
     st.session_state["nombre"] = payload["nombre"]
     st.session_state["rfc"] = payload["rfc"]
 
-    # Pequeña pausa para que el script escriba y luego rerun
-    time.sleep(0.05)
     st.rerun()
+
 
 def borrar_token():
     """
-    Cierra sesión limpiando localStorage, cookies (varias variantes) y session_state.
+    Logout robusto:
+    - Borra y vence el cookie.
+    - Inyecta un borrado por JS como plan C (variantes SameSite).
+    - Limpia session_state.
+    - Cambia la clave de boot del CookieManager para evitar cachés.
     """
-    # localStorage
-    _ls_del(COOKIE_NAME)
+    # Borrado estándar
+    _cookie_del(COOKIE_NAME)
 
-    # cookie manager
-    cm = st.session_state.get("cookie_manager")
-    if cm:
-        try:
-            cm.delete(COOKIE_NAME, path="/")
-        except Exception:
-            pass
-        try:
-            cm.set(
-                COOKIE_NAME,
-                "0",
-                expires_at=datetime.utcnow() - timedelta(days=1),
-                path="/",
-                secure=True,
-            )
-        except Exception:
-            pass
+    # Vencer y sobreescribir con algo inválido
+    try:
+        _cm().set(
+            COOKIE_NAME,
+            "0",
+            expires_at=datetime.utcnow() - timedelta(days=1),
+            path="/",
+            secure=True,
+        )
+    except Exception:
+        pass
 
-    # Barrido JS de cookies
+    # Plan C: intenta borrar variantes con JS
     st.components.v1.html(
         """
         <script>
           (function(){
-            var n='systeso_auth';
-            var paths=['/',''];
-            var attrs=['','SameSite=Lax','SameSite=Strict','SameSite=None; Secure'];
+            var n = 'systeso_auth';
+            var paths = ['/', ''];
+            var attrs = ['', 'SameSite=Lax', 'SameSite=Strict', 'SameSite=None; Secure'];
             for (var p of paths){
               for (var a of attrs){
-                try { document.cookie = n + '=; Max-Age=0; Path=' + p + (a?'; '+a:''); } catch(e){}
+                try { document.cookie = n + '=; Max-Age=0; Path=' + p + (a ? '; ' + a : ''); } catch(e) {}
               }
             }
-            try { localStorage.removeItem('systeso_auth'); } catch(e){}
           })();
         </script>
         """,
         height=0,
     )
 
-    # limpiar memoria/caché
+    # Limpia memoria/caché
     st.session_state.pop("_cookies_cache", None)
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
 
+    # Fuerza nueva clave de boot para el CookieManager en el próximo render
+    st.session_state["cm_boot_key"] = f"boot_{int(time.time()*1000)}"
+
+    # Vuelve al login y rerun
     st.session_state["view"] = "login"
     try:
         st.query_params.clear()
@@ -204,84 +146,49 @@ def borrar_token():
     time.sleep(0.05)
     st.rerun()
 
+
 def restaurar_sesion_completa():
     """
-    1) Si ya hay token en session_state, no hace nada.
-    2) Intenta primero desde localStorage (esperando hidratación).
-    3) Si no, usa el cookie cacheado desde app.py.
-    4) Si no hay nada, deja la vista en login.
+    Si no hay sesión en memoria, intenta restaurar desde cookie.
+    Si la hay pero la vista sigue en 'login', la mueve a 'recibos'.
     """
     if st.session_state.get("token"):
-        return
-
-    # 1) Intentar localStorage
-    raw = _ls_get(COOKIE_NAME)
-    if raw is None:
-        # localStorage aún no está listo: corta render para próximo ciclo
-        st.empty().write("🔄 Restaurando sesión…")
-        st.stop()
-
-    if raw:
-        try:
-            data = json.loads(raw)
-        except Exception:
-            data = None
-        if data:
-            st.session_state["token"]  = data.get("token", "")
-            st.session_state["rol"]    = data.get("rol", "")
-            st.session_state["nombre"] = data.get("nombre", "Empleado")
-            st.session_state["rfc"]    = data.get("rfc", "")
-            if st.session_state.get("view") in (None, "", "login"):
-                st.session_state["view"] = "recibos"
-            return
-
-    # 2) Fallback: cookie (ya cacheado en app.py)
-    data = _cookie_get(COOKIE_NAME)
-    if data:
-        st.session_state["token"]  = data.get("token", "")
-        st.session_state["rol"]    = data.get("rol", "")
-        st.session_state["nombre"] = data.get("nombre", "Empleado")
-        st.session_state["rfc"]    = data.get("rfc", "")
-        if st.session_state.get("view") in (None, "", "login"):
+        if st.session_state.get("view", "login") == "login":
             st.session_state["view"] = "recibos"
         return
 
-    # 3) Nada: asegúrate de quedar en login
-    for k in ("token", "rol", "nombre", "rfc"):
-        st.session_state.pop(k, None)
-    if st.session_state.get("view") != "login":
+    data = _cookie_get(COOKIE_NAME)
+    if not data:
+        # No hay cookie -> asegúrate de que la vista sea login
+        st.session_state.pop("token", None)
+        st.session_state.pop("rol", None)
+        st.session_state.pop("nombre", None)
+        st.session_state.pop("rfc", None)
         st.session_state["view"] = "login"
+        return
+
+    # Cookie válido -> poblar sesión
+    st.session_state["token"] = data.get("token", "")
+    st.session_state["rol"] = data.get("rol", "")
+    st.session_state["nombre"] = data.get("nombre", "Empleado")
+    st.session_state["rfc"] = data.get("rfc", "")
+    if st.session_state.get("view") in (None, "", "login"):
+        st.session_state["view"] = "recibos"
+
 
 def obtener_token():
-    """Devuelve el token desde memoria; si no hay, intenta restaurar."""
     tok = st.session_state.get("token")
     if tok:
         return tok
-
-    # Reintentar localStorage
-    raw = _ls_get(COOKIE_NAME)
-    if raw:
-        try:
-            data = json.loads(raw)
-        except Exception:
-            data = None
-        if data:
-            st.session_state["token"] = data.get("token", "")
-            st.session_state["rol"] = data.get("rol", "")
-            st.session_state["nombre"] = data.get("nombre", "")
-            st.session_state["rfc"] = data.get("rfc", "")
-            return st.session_state["token"]
-
-    # Cookie fallback
     data = _cookie_get(COOKIE_NAME)
-    if data:
-        st.session_state["token"] = data.get("token", "")
-        st.session_state["rol"] = data.get("rol", "")
-        st.session_state["nombre"] = data.get("nombre", "")
-        st.session_state["rfc"] = data.get("rfc", "")
-        return st.session_state["token"]
+    if not data:
+        return None
+    st.session_state["token"] = data.get("token", "")
+    st.session_state["rol"] = data.get("rol", "")
+    st.session_state["nombre"] = data.get("nombre", "")
+    st.session_state["rfc"] = data.get("rfc", "")
+    return st.session_state["token"]
 
-    return None
 
 def obtener_rol():
     rol = st.session_state.get("rol")
@@ -292,9 +199,10 @@ def obtener_rol():
         return None
     return st.session_state.get("rol")
 
-# =========================================================
-# Utilidades JWT (diagnóstico)
-# =========================================================
+
+# --- utilidades para diagnosticar JWT (opcionales) ---
+import base64
+
 def _jwt_payload(token: str):
     try:
         parts = token.split(".")
