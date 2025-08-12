@@ -74,15 +74,59 @@ def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | No
     st.rerun()
 
 def borrar_token():
-    _delete_cookie(COOKIE_NAME)
-    st.session_state.pop("_cookies_cache", None)
+    """
+    Cerrar sesión con alta fiabilidad:
+    - Borra el cookie (path="/") y además lo vence.
+    - Limpia todo rastro en session_state y el cache de cookies.
+    - Inyecta un borrado JS "por si acaso" (variantes SameSite).
+    - Vuelve a la vista login y rerun.
+    """
+    cm = st.session_state.get("cookie_manager")
+
+    # 1) Borrar cookie en el servidor de Streamlit (componente)
+    if cm:
+        try:
+            cm.delete(COOKIE_NAME, path="/")
+        except Exception:
+            pass
+        # 2) Vencerlo explícitamente por si algún navegador lo retiene
+        try:
+            cm.set(
+                COOKIE_NAME,
+                "0",  # valor inválido
+                expires_at=datetime.utcnow() - timedelta(days=1),
+                path="/",
+            )
+        except Exception:
+            pass
+
+    # 3) Plan C (front): borrar cookie con distintas variantes SameSite
+    st.components.v1.html(
+        """
+        <script>
+          (function(){
+            var n = 'systeso_auth';
+            var variants = ['', 'SameSite=Lax', 'SameSite=Strict', 'SameSite=None; Secure'];
+            for (var v of variants) {
+              try { document.cookie = n + '=; Max-Age=0; Path=/' + (v ? '; ' + v : ''); } catch(e) {}
+            }
+          })();
+        </script>
+        """,
+        height=0,
+    )
+
+    # 4) Limpiar estado en memoria
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
+    st.session_state.pop("_cookies_cache", None)  # cache de cookies de este render
     st.session_state["view"] = "login"
     try:
         st.query_params.clear()
     except Exception:
         pass
+
+    # 5) Rerun
     st.rerun()
 
 def restaurar_sesion_completa():
