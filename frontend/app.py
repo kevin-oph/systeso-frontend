@@ -12,7 +12,7 @@ from reset_password import mostrar_formulario_reset
 from utils import (
     guardar_token, obtener_token, borrar_token, obtener_rol,
     restaurar_sesion_completa, EMAIL_REGEX, PASSWORD_REGEX,
-    is_jwt_expired, jwt_exp_unix, ensure_ls_boot
+    is_jwt_expired, jwt_exp_unix
 )
 
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
