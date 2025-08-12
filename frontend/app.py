@@ -13,42 +13,45 @@ from verificacion import verificar_email
 from reset_password import mostrar_formulario_reset
 
 from utils import (
+    # boot & sesión
     ensure_cookies_ready,
+    restaurar_sesion_completa,
     guardar_token,
     obtener_token,
-    borrar_token,
     obtener_rol,
-    restaurar_sesion_completa,
+    borrar_token,
+    # validaciones
     EMAIL_REGEX,
     PASSWORD_REGEX,
+    # diagnóstico JWT
     is_jwt_expired,
     jwt_exp_unix,
 )
 
-# -------------------------- CONFIG --------------------------
+# ------------------- CONFIG -------------------
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# ---------------------- BOOT COOKIES/SESSION ----------------------
-# CookieManager único con key estable
+# ------------------- BOOT COOKIES -------------------
+# Instancia única del CookieManager (clave estable)
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
-# 1) Hidratar cookies y cachearlos para ESTE render (si aún no están listos, corta el ciclo)
+# Hidratar cookies (corta el primer render si aún no están) y cachearlas
 ensure_cookies_ready()
 
-# 2) Restaurar sesión desde cookie si hace falta (puebla token/rol/nombre/rfc y puede setear view)
+# Restaurar sesión desde cookie si hace falta
 restaurar_sesion_completa()
 
-# 3) Si hay token pero la vista quedó en 'login', envía a 'recibos'
+# Si ya hay token pero la vista quedó en login, mandamos a recibos
 if st.session_state.get("token") and st.session_state.get("view") == "login":
     st.session_state["view"] = "recibos"
 
-# 4) Leer token/rol después del boot/restauración
+# Token “vivo” para este render (¡no lo asumas como global, re-llámalo si lo necesitas!)
 token = obtener_token()
 rol_guardado = obtener_rol()
 
-# ---------------------- LINKS ESPECIALES ----------------------
+# ------------------- ENLACES ESPECIALES -------------------
 params = st.query_params
 if "reset_password" in params and "token" in params:
     mostrar_formulario_reset(params["token"])
@@ -57,28 +60,27 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-# ---------------------- DIAGNÓSTICO OPCIONAL ----------------------
+# ------------------- (Opcional) DIAGNÓSTICO -------------------
 st.caption(f"cookie_cache_keys: {list(st.session_state.get('_cookies_cache', {}).keys())}")
 st.caption(f"has_token_in_state: {bool(token)}")
 st.caption(f"view: {st.session_state.get('view', 'login')}")
 if token:
-    st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
+    try:
+        st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
+    except Exception:
+        pass
 
-# -------------------------- CSS --------------------------
-st.markdown(
-    """
-    <style>
-    body, .stApp { background-color: #eaeaea; color: #10312B; }
-    input, select, textarea { background-color: white; color: #10312B; border-radius: 6px; padding: 0.5em; border: 1px solid #235B4E; width: 100%; }
-    label { font-weight: bold; margin-bottom: 0.2em; color: #10312B; }
-    div.stButton > button { background-color: #235B4E; color: white; border-radius: 6px; font-weight: bold; padding: 0.5em 1em; margin-top: 1em; }
-    div.stButton > button:hover { background-color: #BC955C; color: white; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ------------------- ESTILOS -------------------
+st.markdown("""
+<style>
+body, .stApp { background-color: #eaeaea; color: #10312B; }
+input, select, textarea { background-color: white; color: #10312B; border-radius: 6px; padding: 0.5em; border: 1px solid #235B4E; width: 100%; }
+label { font-weight: bold; margin-bottom: 0.2em; color: #10312B; }
+div.stButton > button { background-color: #235B4E; color: white; border-radius: 6px; font-weight: bold; padding: 0.5em 1em; margin-top: 1em; }
+div.stButton > button:hover { background-color: #BC955C; color: white; }
+</style>
+""", unsafe_allow_html=True)
 
-# Header (solo cuando estás en la vista de recibos)
 st.image("banner-systeso.png", use_container_width=True)
 if st.session_state.get("view") == "recibos":
     st.markdown(
@@ -91,7 +93,7 @@ if st.session_state.get("view") == "recibos":
         unsafe_allow_html=True,
     )
 
-# ---------------------- ESTADOS INICIALES ----------------------
+# ------------------- INIT SESSION STATE -------------------
 init_keys = [
     ("view", st.session_state.get("view", "login")),
     ("mostrar_reenvio", False),
@@ -108,18 +110,18 @@ init_keys = [
     ("reset_register_fields", False),
     ("reset_reset_fields", False),
 ]
-for key, val in init_keys:
-    if key not in st.session_state:
-        st.session_state[key] = val
+for k, v in init_keys:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ---------------------- COMPLETAR DATOS USUARIO ----------------------
+# ------------------- COMPLETAR DATOS (suave) -------------------
+# No te saco por fallos de red/5xx. Solo cierro si el JWT está vencido.
 if token and "rol" not in st.session_state:
-    # 1) Si el JWT ya expiró, cerramos sesión
+    # Si caducó, fuera
     if is_jwt_expired(token):
         borrar_token()
         st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
     else:
-        # 2) Validar con backend — solo desloguear si 401/403
         try:
             headers = {"Authorization": f"Bearer {token}"}
             r = requests.get(f"{BASE_URL}/users/me", headers=headers, timeout=10)
@@ -127,18 +129,22 @@ if token and "rol" not in st.session_state:
                 data = r.json()
                 st.session_state.nombre = data.get("nombre", "Empleado")
                 st.session_state.rol = data.get("rol", rol_guardado or "usuario")
-                # Respetar vista ya restaurada; si no hay, ir a 'recibos'
                 st.session_state.view = st.session_state.get("view", "recibos")
             elif r.status_code in (401, 403):
-                borrar_token()
-                st.warning("Tu sesión expiró o no es válida. Inicia sesión nuevamente.")
+                # Si el servidor dice no autorizado pero el JWT NO está vencido,
+                # mantenemos la sesión (puede ser race/latencia). Si quieres ser estricto,
+                # descomenta la siguiente línea:
+                # borrar_token()
+                # st.warning("Tu sesión no es válida. Inicia sesión nuevamente.")
+                pass
             else:
-                # 5xx/otros: mantener sesión
-                st.info("No se pudo validar con el servidor (se mantiene tu sesión).")
+                # 5xx/otros: mantén la sesión
+                pass
         except requests.RequestException:
-            st.info("Servidor no disponible (se mantiene tu sesión).")
+            # Red caída: mantén la sesión
+            pass
 
-# ---------------------- HISTORIAL CARGAS (admin) ----------------------
+# ------------------- HISTORIAL DE CARGAS (ADMIN) -------------------
 def mostrar_historial_cargas():
     tok = obtener_token()
     if not tok:
@@ -155,7 +161,6 @@ def mostrar_historial_cargas():
     if response.status_code == 200:
         historial = response.json()
         st.markdown("### 📂 Historial de archivos Excel cargados:")
-
         if historial:
             df = pd.DataFrame(historial).rename(
                 columns={
@@ -167,7 +172,6 @@ def mostrar_historial_cargas():
             df["Fecha y hora"] = pd.to_datetime(df["Fecha y hora"])
 
             col1, col2, col3 = st.columns(3)
-
             usuarios = df["Usuario"].unique().tolist()
             usuario_sel = col1.selectbox("Filtrar por usuario", options=["Todos"] + usuarios)
             if usuario_sel != "Todos":
@@ -189,11 +193,8 @@ def mostrar_historial_cargas():
     else:
         st.error("Error al consultar el historial de cargas.")
 
-# ---------------------- ROUTER AUTENTICADO ----------------------
-# (volvemos a leer token por seguridad)
-authed_token = obtener_token()
-
-if authed_token:
+# ------------------- RUTAS AUTENTICADAS -------------------
+if token:
     rol = st.session_state.get("rol", "usuario")
     nombre = st.session_state.get("nombre", "Empleado")
 
@@ -211,24 +212,19 @@ if authed_token:
 
         if rol == "admin":
             if st.button("📄 Cargar Recibos ZIP", use_container_width=True):
-                st.session_state.view = "subir_zip"
-                st.rerun()
+                st.session_state.view = "subir_zip"; st.rerun()
             if st.button("📅 Cargar Empleados", use_container_width=True):
-                st.session_state.view = "cargar_excel"
-                st.rerun()
+                st.session_state.view = "cargar_excel"; st.rerun()
             if st.button("📑 Historial Excel", use_container_width=True):
-                st.session_state.view = "historial_excel"
-                st.rerun()
+                st.session_state.view = "historial_excel"; st.rerun()
         else:
             if st.button("📄 Ver Recibos", use_container_width=True):
-                st.session_state.view = "recibos"
-                st.rerun()
+                st.session_state.view = "recibos"; st.rerun()
 
         st.markdown("###")
         if st.button("🚪 Cerrar sesión", use_container_width=True):
             borrar_token()  # limpia cookie + session_state y hace rerun
 
-    # Router autenticado
     if st.session_state.view == "subir_zip" and rol == "admin":
         subir_zip()
     elif st.session_state.view == "cargar_excel" and rol == "admin":
@@ -238,7 +234,7 @@ if authed_token:
     else:
         mostrar_recibos()
 
-# ---------------------- LOGIN ----------------------
+# ------------------- LOGIN -------------------
 elif st.session_state.view == "login":
     st.subheader("🔐 Iniciar Sesión", divider="grey")
 
@@ -262,11 +258,12 @@ elif st.session_state.view == "login":
             else:
                 with st.spinner("🔄 Validando credenciales..."):
                     result = login_user(email, password)
+
                 if result and isinstance(result, dict):
                     if "access_token" in result:
                         st.session_state.reset_login_fields = True
                         guardar_token(result["access_token"], result["rol"], result.get("nombre"), result.get("rfc"))
-                        # guardar_token hace rerun → restaurar + users/me te dejarán en 'recibos'
+                        # guardar_token -> set cookie + state + rerun
                     elif result.get("error") == "no_verificado":
                         st.session_state.mostrar_reenvio = True
                         st.warning("⚠️ Tu correo aún no ha sido verificado. Puedes reenviar la verificación abajo.")
@@ -308,7 +305,7 @@ elif st.session_state.view == "login":
                     st.error(f"⚠️ Error al contactar backend: {e}")
                     st.toast("🔌 Error de conexión.")
 
-# ---------------------- REGISTRO ----------------------
+# ------------------- REGISTRO -------------------
 elif st.session_state.view == "register":
     st.subheader("📝 Registro de usuario", divider="grey")
 
@@ -328,26 +325,19 @@ elif st.session_state.view == "register":
 
     if st.button("Registrar"):
         errores = []
-        if not clave:
-            errores.append("La clave de empleado es obligatoria.")
-        if not rfc:
-            errores.append("El RFC es obligatorio.")
-        if not email:
-            errores.append("El correo electrónico es obligatorio.")
+        if not clave: errores.append("La clave de empleado es obligatoria.")
+        if not rfc: errores.append("El RFC es obligatorio.")
+        if not email: errores.append("El correo electrónico es obligatorio.")
         if email and not re.match(EMAIL_REGEX, email):
             errores.append("El correo electrónico no tiene un formato válido. Ejemplo: usuario@ejemplo.com")
-        if not password:
-            errores.append("La contraseña es obligatoria.")
+        if not password: errores.append("La contraseña es obligatoria.")
         if password and not re.match(PASSWORD_REGEX, password):
             errores.append("La contraseña debe tener mínimo 8 caracteres, al menos una mayúscula, una minúscula y un número.")
-        if not confirmar:
-            errores.append("Confirma tu contraseña.")
-        if password != confirmar:
-            errores.append("Las contraseñas no coinciden.")
+        if not confirmar: errores.append("Confirma tu contraseña.")
+        if password != confirmar: errores.append("Las contraseñas no coinciden.")
 
         if errores:
-            for err in errores:
-                st.error(err)
+            for err in errores: st.error(err)
         else:
             data = {"clave": clave, "rfc": rfc, "email": email, "password": password}
             with st.spinner("Registrando usuario..."):
@@ -370,7 +360,7 @@ elif st.session_state.view == "register":
         st.session_state.reset_register_fields = True
         st.rerun()
 
-# ---------------------- REENVÍO MANUAL DE VERIFICACIÓN ----------------------
+# ------------------- REENVÍO VERIFICACIÓN -------------------
 elif st.session_state.view == "reenviar":
     st.subheader("📩 Reenviar correo de verificación")
     email_reintento = st.text_input("📧 Ingresa tu correo registrado", key="reenviar_email")
@@ -384,8 +374,7 @@ elif st.session_state.view == "reenviar":
                         st.success("✅ Se ha reenviado el correo correctamente.")
                         st.toast("📬 Verificación reenviada a tu correo.")
                         if st.button("🔐 Ir al Login"):
-                            st.session_state.view = "login"
-                            st.rerun()
+                            st.session_state.view = "login"; st.rerun()
                     else:
                         st.error("❌ No se pudo reenviar el correo. Verifica que el correo esté registrado.")
                         st.toast("⚠️ Falló el reenvío. ¿Correo válido?")
@@ -394,10 +383,9 @@ elif st.session_state.view == "reenviar":
                     st.toast("🔌 No se pudo contactar al backend.")
     with col2:
         if st.button("🔙 Volver al inicio"):
-            st.session_state.view = "login"
-            st.rerun()
+            st.session_state.view = "login"; st.rerun()
 
-# ---------------------- RECUPERAR CONTRASEÑA ----------------------
+# ------------------- RECUPERAR PASSWORD -------------------
 elif st.session_state.view == "recuperar_password":
     st.subheader("🔑 Recuperar Contraseña")
 
