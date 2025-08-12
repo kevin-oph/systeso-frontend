@@ -122,71 +122,68 @@ def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | No
 
 def borrar_token():
     """
-    Cierra sesión de forma robusta:
-    - Borra/vence el cookie con distintos métodos.
-    - Limpia cache local de cookies y datos de sesión.
-    - Cambia la key de boot para romper cache del componente.
-    - Vuelve a 'login' y rerun.
+    Cierra sesión con alta fiabilidad:
+    1) Intenta borrar el cookie (path "/").
+    2) Lo vence en el pasado y además lo sobreescribe con un valor inválido.
+    3) Inyecta JS para borrarlo en varias variantes (Strict/Lax/None; con/sin Secure).
+    4) Limpia cache de cookies y datos de sesión.
+    5) Cambia la 'boot key' para que el próximo get_all() no use el cache anterior.
+    6) Cambia la vista a 'login' y fuerza un rerun.
     """
     cm = st.session_state.get("cookie_manager")
 
-    # 1) Intento directo: delete con path "/"
+    # 1) Borrado "oficial" con path="/"
     if cm:
         try:
             cm.delete(COOKIE_NAME, path="/")
         except Exception:
             pass
 
-        # 2) Vencer el cookie: expirar en el pasado (por si delete no coincide en atributos)
+        # 2) Vencer y sobreescribir con valor inválido
         try:
             cm.set(
                 COOKIE_NAME,
-                "",
+                "0",  # valor no JSON -> _get_cookie() lo ignora
                 expires_at=datetime.utcnow() - timedelta(days=1),
                 path="/",
-                secure=True,     # OK aunque no esté siempre en https; si falla, no pasa nada
+                secure=True,
             )
         except Exception:
             pass
 
-    # 3) Plan C: borrar con JS en varias variantes (Strict/Lax/None; con/ sin Secure)
+    # 3) Plan C: JS (borra con variantes)
     st.components.v1.html("""
     <script>
       (function(){
-        var names = ['systeso_auth'];
+        var n = 'systeso_auth';
         var paths = ['/', ''];
-        var attrs = [
-          '', 'SameSite=Lax', 'SameSite=Strict', 'SameSite=None; Secure'
-        ];
-        for (var n of names){
-          for (var p of paths){
-            for (var a of attrs){
-              try {
-                document.cookie = n + '=; Max-Age=0; Path=' + p + (a ? '; ' + a : '');
-              } catch(e) {}
-            }
+        var attrs = ['', 'SameSite=Lax', 'SameSite=Strict', 'SameSite=None; Secure'];
+        for (var p of paths){
+          for (var a of attrs){
+            try { document.cookie = n + '=; Max-Age=0; Path=' + p + (a ? '; ' + a : ''); } catch(e) {}
           }
         }
       })();
     </script>
     """, height=0)
 
-    # 4) Limpiar cache y session_state
+    # 4) Limpiar cache y sesión
     st.session_state.pop("_cookies_cache", None)
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
 
-    # 5) Forzar que el próximo get_all() use otra key (rompe cache del componente)
+    # 5) Romper el cache interno del componente en el próximo render
     st.session_state["cm_boot_key"] = f"boot_{int(time.time()*1000)}"
 
-    # 6) Volver a login y limpiar query params
+    # 6) Volver a login y rerun
     st.session_state["view"] = "login"
     try:
         st.query_params.clear()
     except Exception:
         pass
 
-    # 7) Rerun
+    # pequeño respiro para que el front ejecute el JS antes del rerun
+    time.sleep(0.1)
     st.rerun()
 
 def restaurar_sesion_completa():
