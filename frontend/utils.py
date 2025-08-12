@@ -122,13 +122,36 @@ def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | No
 
 def borrar_token():
     """
-    Logout: borra localStorage + cookie y limpia session_state.
+    Cierra sesión:
+    - Borra el cookie con el mismo path con el que fue creado (/)
+    - Limpia el cache local de cookies y los datos de sesión
+    - Cambia la key usada por get_all() para forzar que el componente no devuelva cache
+    - Vuelve a la vista 'login' y hace rerun
     """
-    _ls_del(COOKIE_NAME)
-    _cookie_del(COOKIE_NAME)
+    cm = st.session_state.get("cookie_manager")
+    if cm:
+        try:
+            cm.delete(COOKIE_NAME, path="/")
+        except Exception:
+            pass
 
-    for k in ("token", "rol", "nombre", "rfc", "_cookies_cache"):
+    # Limpia cache y session_state
+    st.session_state.pop("_cookies_cache", None)
+    for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
+
+    # Fuerza que la próxima lectura de cookies use otra key (rompe cache interno)
+    st.session_state["cm_boot_key"] = f"boot_{int(time.time()*1000)}"
+
+    # manda a login
+    st.session_state["view"] = "login"
+
+    # Limpia query params por si hay token/verificación en URL
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
     st.rerun()
 
 def restaurar_sesion_completa():

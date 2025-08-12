@@ -18,15 +18,18 @@ from utils import (
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# (Opcional) Instancia única de CookieManager y cache de respaldo
+
+# Instancia ÚNICA del CookieManager
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
-
 cm = st.session_state["cookie_manager"]
-cookies = cm.get_all(key="boot_cache")
+
+# Usa una key dinámica cuando hiciste logout para romper el cache del componente
+boot_key = st.session_state.get("cm_boot_key", "boot")
+cookies = cm.get_all(key=boot_key)
+
 if cookies is None:
-    st.stop()  # primer ciclo: hidratar componente
-st.session_state["_cookies_cache"] = cookies  # por si el cookie fuera necesario
+    st.stop()
 
 # 1) Restaurar sesión desde localStorage (y si no, desde cookie)
 restaurar_sesion_completa()
