@@ -10,7 +10,7 @@ from verificacion import verificar_email
 from reset_password import mostrar_formulario_reset
 
 from utils import (
-    guardar_token, obtener_token, borrar_token, obtener_rol,
+    ensure_cookies_ready, guardar_token, obtener_token, borrar_token, obtener_rol,
     restaurar_sesion_completa, EMAIL_REGEX, PASSWORD_REGEX,
     is_jwt_expired, jwt_exp_unix
 )
@@ -19,30 +19,17 @@ st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
 
-# Instancia ÚNICA del CookieManager
+
+# CookieManager ÚNICO para toda la app
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
-cm = st.session_state["cookie_manager"]
+# Hidratar cookies y cachearlos para este render
+ensure_cookies_ready()
 
-# Clave de boot; utils.borrar_token la cambia para romper caché tras logout
-boot_key = st.session_state.get("cm_boot_key", "boot1")
-cookies = cm.get_all(key=boot_key)
-
-# Primer render tras carga: get_all() puede devolver None -> corta este ciclo y vuelve
-if cookies is None:
-    st.write("🔄 Restaurando sesión...")
-    st.stop()
-
-# Cachear cookies en este render para que utils.py las use sin volver a llamar
-st.session_state["_cookies_cache"] = cookies
-
-# 1) Restaurar sesión desde localStorage (y si no, desde cookie)
+# Restaurar sesión desde cookie si hace falta
 restaurar_sesion_completa()
-
-# 2) Token/rol ya deberían estar cargados
 token = obtener_token()
-
 rol_guardado = obtener_rol()
 
 # Links especiales (verificación / reset)

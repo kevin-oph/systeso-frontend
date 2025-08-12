@@ -1,42 +1,58 @@
 # utils.py
-import json
+import json, base64, time
 from datetime import datetime, timedelta
-import time
-
 import streamlit as st
 import extra_streamlit_components as stx
 
-# ---------------- Reglas de validación ----------------
 EMAIL_REGEX = r"^[\w\.-]+@[\w\.-]+\.\w+$"
 PASSWORD_REGEX = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"
 
-# ---------------- Config de sesión ----------------
 COOKIE_NAME = "systeso_auth"
-COOKIE_DAYS = 7  # días de validez del login
+COOKIE_DAYS = 7
 
-# ======================================================
-# ===============  HELPER: COOKIE MANAGER ==============
-# ======================================================
-
+# ---------- CookieManager único ----------
 def _cm():
-    """
-    Devuelve la instancia ÚNICA del CookieManager creada en app.py.
-    Si se llama fuera de orden, crea una de respaldo con otra key.
-    """
-    if "cookie_manager" in st.session_state:
-        return st.session_state["cookie_manager"]
-    if "_cookie_manager" not in st.session_state:
-        st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm_fallback")
-    return st.session_state["_cookie_manager"]
+    cm = st.session_state.get("cookie_manager")
+    if cm is not None:
+        return cm
+    # fallback si alguien llama fuera de orden (no ideal, pero evita crash)
+    if "_cookie_manager_fallback" not in st.session_state:
+        st.session_state["_cookie_manager_fallback"] = stx.CookieManager(key="systeso_cm_fallback")
+    return st.session_state["_cookie_manager_fallback"]
 
-def _cookie_get_all():
-    """Lee el caché de cookies cargado en app.py."""
-    return st.session_state.get("_cookies_cache")
+def ensure_cookies_ready() -> None:
+    """
+    Hidrata CookieManager UNA sola vez y cachea los cookies para este render.
+    Llama a esta función **solo en app.py** y lo más arriba posible.
+    """
+    if "cookie_manager" not in st.session_state:
+        st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
-def _cookie_get(name: str):
-    cookies = _cookie_get_all()
-    if not cookies:
-        return None
+    if st.session_state.get("_cookies_cache") is None:
+        cookies = st.session_state["cookie_manager"].get_all(key="cm_boot")
+        if cookies is None:
+            st.empty().write("🔄 Restaurando sesión...")
+            st.stop()  # siguiente ciclo ya trae cookies
+        st.session_state["_cookies_cache"] = cookies
+
+# ---------- Helpers de cookie ----------
+def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS):
+    exp = datetime.utcnow() + timedelta(days=days)
+    payload = json.dumps(value)
+    try:
+        _cm().set(name, payload, expires_at=exp, path="/", secure=True)
+    except TypeError:
+        # versiones antiguas no aceptan 'secure'
+        _cm().set(name, payload, expires_at=exp, path="/")
+
+def _delete_cookie(name: str):
+    try:
+        _cm().delete(name, path="/")
+    except Exception:
+        pass
+
+def _read_cookie(name: str):
+    cookies = st.session_state.get("_cookies_cache") or {}
     raw = cookies.get(name)
     if not raw:
         return None
@@ -45,143 +61,74 @@ def _cookie_get(name: str):
     except Exception:
         return None
 
-def _cookie_set(name: str, value: dict, days: int = COOKIE_DAYS):
-    """
-    Guarda un cookie JSON con expiración y path raíz.
-    """
-    expires_at = datetime.utcnow() + timedelta(days=days)
-    val = json.dumps(value)
-    cm = _cm()
-    try:
-        cm.set(name, val, expires_at=expires_at, path="/", secure=True)
-    except TypeError:
-        # versiones antiguas del componente no aceptan "secure"
-        cm.set(name, val, expires_at=expires_at, path="/")
-
-def _cookie_delete(name: str):
-    """
-    Borra el cookie usando el mismo path. Reintenta venciendo en el pasado.
-    """
-    cm = _cm()
-    try:
-        cm.delete(name, path="/")
-    except Exception:
-        pass
-    try:
-        cm.set(name, "0", expires_at=datetime.utcnow() - timedelta(days=1), path="/")
-    except Exception:
-        pass
-
-# ======================================================
-# ===============  API PÚBLICA DE SESIÓN ===============
-# ======================================================
-
+# ---------- API de sesión ----------
 def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | None = None):
-    """
-    Guarda token + datos en cookie y en session_state y hace rerun.
-    """
-    payload = {
-        "token": token,
-        "rol": rol,
-        "nombre": nombre or "",
-        "rfc": rfc or "",
-    }
+    data = {"token": token, "rol": rol, "nombre": nombre or "", "rfc": rfc or ""}
+    _set_cookie(COOKIE_NAME, data, COOKIE_DAYS)
+    st.session_state.update({
+        "token": data["token"],
+        "rol": data["rol"],
+        "nombre": data["nombre"],
+        "rfc": data["rfc"],
+    })
+    st.rerun()
 
-    _cookie_set(COOKIE_NAME, payload, days=COOKIE_DAYS)
-
-    # Sesión en memoria para uso inmediato
-    st.session_state["token"] = token
-    st.session_state["rol"] = rol
-    st.session_state["nombre"] = payload["nombre"]
-    st.session_state["rfc"] = payload["rfc"]
-
+def borrar_token():
+    _delete_cookie(COOKIE_NAME)
+    st.session_state.pop("_cookies_cache", None)
+    for k in ("token", "rol", "nombre", "rfc"):
+        st.session_state.pop(k, None)
+    st.session_state["view"] = "login"
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     st.rerun()
 
 def restaurar_sesion_completa():
-    """
-    Si no hay sesión en memoria, intenta restaurar desde el cookie (cargado en app.py).
-    No usa localStorage para evitar bucles y depender solo de cookie (estable).
-    """
+    """Restaura sesión desde cookie si en memoria no hay token."""
     if st.session_state.get("token"):
-        return  # ya hay sesión
-
-    data = _cookie_get(COOKIE_NAME)
-    if not data:
-        # No hay cookie válido -> asegurar estado 'no autenticado'
-        for k in ("token", "rol", "nombre", "rfc"):
-            st.session_state.pop(k, None)
-        if st.session_state.get("view") != "login":
-            st.session_state["view"] = "login"
         return
-
-    # Poblar sesión desde cookie
-    st.session_state["token"] = data.get("token", "")
-    st.session_state["rol"] = data.get("rol", "")
+    data = _read_cookie(COOKIE_NAME)
+    if not data:
+        # fuerza/respeta login si no hay cookie
+        st.session_state["view"] = st.session_state.get("view", "login")
+        return
+    st.session_state["token"]  = data.get("token", "")
+    st.session_state["rol"]    = data.get("rol", "")
     st.session_state["nombre"] = data.get("nombre", "Empleado")
-    st.session_state["rfc"] = data.get("rfc", "")
+    st.session_state["rfc"]    = data.get("rfc", "")
     if st.session_state.get("view") in (None, "", "login"):
         st.session_state["view"] = "recibos"
 
 def obtener_token():
-    """
-    Devuelve el token desde memoria o, si falta, desde el cookie ya bootstrapeado.
-    """
     tok = st.session_state.get("token")
     if tok:
         return tok
-
-    data = _cookie_get(COOKIE_NAME)
-    if data:
-        st.session_state["token"] = data.get("token", "")
-        st.session_state["rol"] = data.get("rol", "")
-        st.session_state["nombre"] = data.get("nombre", "")
-        st.session_state["rfc"] = data.get("rfc", "")
-        return st.session_state["token"]
-
-    return None
+    data = _read_cookie(COOKIE_NAME)
+    if not data:
+        return None
+    st.session_state["token"]  = data.get("token", "")
+    st.session_state["rol"]    = data.get("rol", "")
+    st.session_state["nombre"] = data.get("nombre", "")
+    st.session_state["rfc"]    = data.get("rfc", "")
+    return st.session_state["token"]
 
 def obtener_rol():
     rol = st.session_state.get("rol")
     if rol:
         return rol
     tok = obtener_token()
-    if not tok:
-        return None
-    return st.session_state.get("rol")
+    return st.session_state.get("rol") if tok else None
 
-def borrar_token():
-    """
-    Logout: borra cookie + limpia session_state + cambia la clave de boot y forzar rerun.
-    """
-    _cookie_delete(COOKIE_NAME)
-
-    # Limpia cachés y sesión
-    st.session_state.pop("_cookies_cache", None)
-    for k in ("token", "rol", "nombre", "rfc"):
-        st.session_state.pop(k, None)
-
-    # Rompe el caché de get_all() del próximo ciclo
-    st.session_state["cm_boot_key"] = f"boot_{int(time.time() * 1000)}"
-
-    # Volver a login
-    st.session_state["view"] = "login"
-    try:
-        st.query_params.clear()
-    except Exception:
-        pass
-
-    st.rerun()
-
-# ---------- utilidades JWT de diagnóstico (opcionales) ----------
-import base64, time as _time
-
+# ---------- Diagnóstico opcional de JWT ----------
 def _jwt_payload(token: str):
     try:
         parts = token.split(".")
         if len(parts) != 3:
             return None
-        padded = parts[1] + "=" * (-len(parts[1]) % 4)
-        return json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+        s = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(s.encode()).decode())
     except Exception:
         return None
 
@@ -193,4 +140,4 @@ def is_jwt_expired(token: str) -> bool:
     exp = jwt_exp_unix(token)
     if not exp:
         return True
-    return int(_time.time()) >= int(exp)
+    return int(time.time()) >= int(exp)
