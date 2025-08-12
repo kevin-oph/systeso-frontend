@@ -32,17 +32,33 @@ def _cm():
 
 
 def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS) -> None:
-    """Guarda un cookie con expiración y atributos compatibles/seguros."""
+    """
+    Guarda un cookie con expiración y path="/".
+    Intenta usar same_site/secure si la versión de extra_streamlit_components lo soporta;
+    si no, hace fallback sin esos argumentos.
+    """
     expires_at = datetime.utcnow() + timedelta(days=days)
-    _cm().set(
-        name,
-        json.dumps(value),
-        expires_at=expires_at,
-        path="/",        # disponible en toda la app
-        secure=True,     # en Railway (HTTPS) debe ser True; en local HTTP, cambia a False si lo necesitas
-        sameSite="Lax",  # no lo bloquea Chrome en navegación de mismo sitio
-        # domain: omitir para usar el host actual y evitar problemas de subdominios
-    )
+    payload = json.dumps(value)
+
+    cm = _cm()
+    try:
+        # Versiones recientes (algunas aceptan 'same_site' y 'secure')
+        cm.set(
+            name,
+            payload,
+            expires_at=expires_at,
+            path="/",
+            same_site="Lax",   # <- NOTA: 'same_site' con guion bajo
+            secure=True,       # <- si la versión no lo soporta, cae al except
+        )
+    except TypeError:
+        # Versiones antiguas: solo usa expires_at y path
+        cm.set(
+            name,
+            payload,
+            expires_at=expires_at,
+            path="/",
+        )
 
 
 def _delete_cookie(name: str) -> None:
