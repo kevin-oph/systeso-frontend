@@ -14,6 +14,34 @@ COOKIE_NAME = "systeso_auth"
 COOKIE_DAYS = 7
 
 
+
+
+# --- Utils para revisar expiración de JWT ---
+import base64, json, time
+
+def _b64url_decode(s: str) -> bytes:
+    s += "=" * (-len(s) % 4)            # padding
+    return base64.urlsafe_b64decode(s)
+
+def jwt_exp_unix(token: str) -> int:
+    """Devuelve el 'exp' del JWT en segundos unix (0 si no hay exp)."""
+    try:
+        payload_b64 = token.split(".")[1]
+        data = json.loads(_b64url_decode(payload_b64))
+        return int(data.get("exp", 0))
+    except Exception:
+        return 0
+
+def is_jwt_expired(token: str, skew_seconds: int = 30) -> bool:
+    """
+    True si el token ya venció (tolerancia de skew para relojes).
+    """
+    exp = jwt_exp_unix(token)
+    if not exp:
+        return True
+    return (time.time() + skew_seconds) >= exp
+
+
 # ===================== Infra de cookies (una sola instancia) =====================
 
 def _cm():

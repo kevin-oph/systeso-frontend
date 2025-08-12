@@ -1,9 +1,11 @@
 # app.py
-import streamlit as st
-import requests
 import re
+import time
+import requests
 import pandas as pd
+import streamlit as st
 import extra_streamlit_components as stx
+
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
 from cargar_excel import cargar_excel_empleados
@@ -18,53 +20,57 @@ from utils import (
     restaurar_sesion_completa,
     EMAIL_REGEX,
     PASSWORD_REGEX,
+    is_jwt_expired,  # utils tiene helpers para exp del JWT
 )
 
+# ------------------------------------------------------------
+# Config global de Streamlit (debe ir lo más arriba posible)
+# ------------------------------------------------------------
+st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
+BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# --- BOOT COOKIES: crear una sola instancia y leer get_all() solo una vez ---
+# ------------------------------------------------------------
+# BOOT COOKIES: una sola instancia + get_all() una sola vez
+# ------------------------------------------------------------
 if "cookie_manager" not in st.session_state:
-    # Instancia ÚNICA del cookie manager (key estable)
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
 cm = st.session_state["cookie_manager"]
 
-# get_all UNA sola vez por render; clave única "boot"
+# Lectura única de cookies en este render. En el primer ciclo puede ser None.
 cookies = cm.get_all(key="boot")
-
-# Primer ciclo tras carga: get_all() devuelve None -> cortamos este render
 if cookies is None:
+    # Primer ciclo tras carga → el componente aún no está hidratado
     st.stop()
 
-# Cachear cookies para el resto del render (y que utils.py los use sin volver a llamar)
+# Cachear cookies para el resto del render (utils leerá de aquí sin volver a llamar get_all)
 st.session_state["_cookies_cache"] = cookies
 
-
-# --- CONFIG GLOBAL ---
-st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
-BASE_URL = "https://systeso-backend-production.up.railway.app"
-
-# ========== BLOQUE CRÍTICO: COOKIES Y SESIÓN ==========
-
-# 2) Restaura sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
-restaurar_sesion_completa()
-
-# 3) Solo después lee token/rol
-token = obtener_token()
-rol_guardado = obtener_rol()
-
-# -------------------------- DETECCIÓN DE ENLACES ESPECIALES --------------------------
-# (Se ejecuta después de tener cookies listos; si entra por link especial, cortamos el flujo aquí)
+# ------------------------------------------------------------
+# Enlaces especiales (reset/verificación) — se permiten sin sesión
+# ------------------------------------------------------------
 params = st.query_params
 if "reset_password" in params and "token" in params:
     mostrar_formulario_reset(params["token"])
     st.stop()
-
 if "token" in params:
     verificar_email()
     st.stop()
 
-# -------------------------- CSS (opcional, conservado) --------------------------
-st.markdown("""
+# ------------------------------------------------------------
+# Restaurar sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
+# ------------------------------------------------------------
+restaurar_sesion_completa()
+
+# Leer token/rol ya restaurados
+token = obtener_token()
+rol_guardado = obtener_rol()
+
+# ------------------------------------------------------------
+# CSS (tu estilo original)
+# ------------------------------------------------------------
+st.markdown(
+    """
     <style>
     body, .stApp { background-color: #eaeaea; color: #10312B; }
     input, select, textarea { background-color: white; color: #10312B; border-radius: 6px; padding: 0.5em; border: 1px solid #235B4E; width: 100%; }
@@ -72,9 +78,11 @@ st.markdown("""
     div.stButton > button { background-color: #235B4E; color: white; border-radius: 6px; font-weight: bold; padding: 0.5em 1em; margin-top: 1em; }
     div.stButton > button:hover { background-color: #BC955C; color: white; }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-# -------------------------- UI HEADER --------------------------
+# Header (solo cuando estás en la vista de recibos)
 st.image("banner-systeso.png", use_container_width=True)
 if st.session_state.get("view") == "recibos":
     st.markdown(
@@ -87,8 +95,9 @@ if st.session_state.get("view") == "recibos":
         unsafe_allow_html=True,
     )
 
-# -------------------------- INICIALIZACIÓN DE ESTADOS --------------------------
-# Importante: no machacar 'view' si ya viene restaurada desde cookie.
+# ------------------------------------------------------------
+# Inicialización de estados (no sobrescribas view si ya fue restaurada)
+# ------------------------------------------------------------
 init_keys = [
     ("view", st.session_state.get("view", "login")),
     ("mostrar_reenvio", False),
@@ -101,7 +110,6 @@ init_keys = [
     ("register_password", ""),
     ("register_confirmar", ""),
     ("reset_email", ""),
-    # Flags para limpiar campos de formularios
     ("reset_login_fields", False),
     ("reset_register_fields", False),
     ("reset_reset_fields", False),
@@ -110,26 +118,38 @@ for key, val in init_keys:
     if key not in st.session_state:
         st.session_state[key] = val
 
-# -------------------------- COMPLETAR DATOS DEL USUARIO (si hay token) --------------------------
-# No te desloguees por cualquier error; solo si es 401 (expirado).
+# ------------------------------------------------------------
+# Completar datos del usuario si hay token (sin desloguear por 5xx/timeouts)
+# ------------------------------------------------------------
 if token and "rol" not in st.session_state:
-    try:
-        headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get(f"{BASE_URL}/users/me", headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            st.session_state.nombre = data.get("nombre", "Empleado")
-            st.session_state.rol = data.get("rol", rol_guardado or "usuario")
-            # respeta la vista ya restaurada; si no hay, pasa a 'recibos'
-            st.session_state.view = st.session_state.get("view", "recibos")
-        elif response.status_code == 401:
-            borrar_token()
-            st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
-        # otros estados: no borres token (problemas transitorios/red)
-    except Exception:
-        pass
+    # 1) Si el JWT ya expiró, cerramos sesión
+    if is_jwt_expired(token):
+        borrar_token()
+        st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
+    else:
+        # 2) Ping al backend: solo cerrar si 401/403
+        try:
+            headers = {"Authorization": f"Bearer {token}"}
+            r = requests.get(f"{BASE_URL}/users/me", headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                st.session_state.nombre = data.get("nombre", "Empleado")
+                st.session_state.rol = data.get("rol", rol_guardado or "usuario")
+                # Respetar vista ya restaurada; si no hay, ir a 'recibos'
+                st.session_state.view = st.session_state.get("view", "recibos")
+            elif r.status_code in (401, 403):
+                borrar_token()
+                st.warning("Tu sesión expiró o no es válida. Inicia sesión nuevamente.")
+            else:
+                # 5xx/otros → mantenemos sesión
+                st.info("No se pudo validar con el servidor (se mantiene tu sesión).")
+        except requests.RequestException:
+            # Problema de red → mantener sesión
+            st.info("Servidor no disponible (se mantiene tu sesión).")
 
-# -------------------------- HISTORIAL DE CARGAS (admin) --------------------------
+# ------------------------------------------------------------
+# Función: Historial de cargas (admin)
+# ------------------------------------------------------------
 def mostrar_historial_cargas():
     tok = obtener_token()
     if not tok:
@@ -146,7 +166,6 @@ def mostrar_historial_cargas():
     if response.status_code == 200:
         historial = response.json()
         st.markdown("### 📂 Historial de archivos Excel cargados:")
-
         if historial:
             df = pd.DataFrame(historial).rename(
                 columns={
@@ -156,7 +175,6 @@ def mostrar_historial_cargas():
                 }
             )
             df["Fecha y hora"] = pd.to_datetime(df["Fecha y hora"])
-
             col1, col2, col3 = st.columns(3)
 
             usuarios = df["Usuario"].unique().tolist()
@@ -180,7 +198,9 @@ def mostrar_historial_cargas():
     else:
         st.error("Error al consultar el historial de cargas.")
 
-# -------------------------- SESIÓN ACTIVA --------------------------
+# ------------------------------------------------------------
+# Rutas autenticadas
+# ------------------------------------------------------------
 if token:
     rol = st.session_state.get("rol", "usuario")
     nombre = st.session_state.get("nombre", "Empleado")
@@ -216,7 +236,7 @@ if token:
         if st.button("🚪 Cerrar sesión", use_container_width=True):
             borrar_token()  # limpia cookie + session_state y hace rerun
 
-    # Router de vistas autenticadas
+    # Router autenticado
     if st.session_state.view == "subir_zip" and rol == "admin":
         subir_zip()
     elif st.session_state.view == "cargar_excel" and rol == "admin":
@@ -226,7 +246,9 @@ if token:
     else:
         mostrar_recibos()
 
-# -------------------------- LOGIN --------------------------
+# ------------------------------------------------------------
+# Login
+# ------------------------------------------------------------
 elif st.session_state.view == "login":
     st.subheader("🔐 Iniciar Sesión", divider="grey")
 
@@ -254,7 +276,7 @@ elif st.session_state.view == "login":
                     if "access_token" in result:
                         st.session_state.reset_login_fields = True
                         guardar_token(result["access_token"], result["rol"], result.get("nombre"), result.get("rfc"))
-                        # guardar_token hace rerun, y gracias a restaurar + users/me nos quedamos en 'recibos'
+                        # guardar_token hace rerun → restaurar + users/me te dejarán en 'recibos'
                     elif result.get("error") == "no_verificado":
                         st.session_state.mostrar_reenvio = True
                         st.warning("⚠️ Tu correo aún no ha sido verificado. Puedes reenviar la verificación abajo.")
@@ -296,7 +318,9 @@ elif st.session_state.view == "login":
                     st.error(f"⚠️ Error al contactar backend: {e}")
                     st.toast("🔌 Error de conexión.")
 
-# -------------------------- REGISTRO --------------------------
+# ------------------------------------------------------------
+# Registro
+# ------------------------------------------------------------
 elif st.session_state.view == "register":
     st.subheader("📝 Registro de usuario", divider="grey")
 
@@ -358,7 +382,9 @@ elif st.session_state.view == "register":
         st.session_state.reset_register_fields = True
         st.rerun()
 
-# -------------------------- REENVÍO MANUAL DE VERIFICACIÓN --------------------------
+# ------------------------------------------------------------
+# Reenvío manual de verificación
+# ------------------------------------------------------------
 elif st.session_state.view == "reenviar":
     st.subheader("📩 Reenviar correo de verificación")
     email_reintento = st.text_input("📧 Ingresa tu correo registrado", key="reenviar_email")
@@ -385,7 +411,9 @@ elif st.session_state.view == "reenviar":
             st.session_state.view = "login"
             st.rerun()
 
-# -------------------------- RECUPERACIÓN DE CONTRASEÑA --------------------------
+# ------------------------------------------------------------
+# Recuperación de contraseña
+# ------------------------------------------------------------
 elif st.session_state.view == "recuperar_password":
     st.subheader("🔑 Recuperar Contraseña")
 
