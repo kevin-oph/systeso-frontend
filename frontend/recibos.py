@@ -66,25 +66,33 @@ def _descargar_pdf_bytes(pdf_endpoint: str, headers: dict):
 
     return r.content, None
 
-def _mostrar_pdf_centrado(pdf_bytes: bytes, max_width_px: int = 1200, height_vh: int = 88):
+def _mostrar_pdf_centrado(
+    pdf_bytes: bytes,
+    max_width_px: int = 1100,     # ancho máximo en desktop (sube a 1200/1280 si quieres)
+    height_vh: int = 88,          # alto relativo a la ventana (usa 80 si te queda muy alto)
+    max_height_px: int = 1200,    # tope de alto absoluto
+    viewport_margin_px: int = 48  # margen lateral para que no pegue a los bordes en móvil
+):
     """
-    1) Intento con streamlit_pdf_viewer (PDF.js interno).
-    2) Fallback con <object data="data:application/pdf;base64,..."> centrado.
+    Muestra el PDF centrado y RESPONSIVO usando <object> con data:application/pdf.
+    Se ajusta al ancho de la ventana y respeta un ancho máximo en desktop.
     """
-    try:
-        pdf_viewer(pdf_bytes, width=max_width_px, height=1200)
-        return
-    except Exception:
-        pass
-
     b64 = base64.b64encode(pdf_bytes).decode("utf-8")
     html = f"""
     <div style="display:flex;justify-content:center;">
-      <object data="data:application/pdf;base64,{b64}#zoom=page-width"
-              type="application/pdf"
-              style="width:100%;max-width:{max_width_px}px;height:{height_vh}vh;border:none;
-                     border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-        <p>No se pudo mostrar el PDF. <a download="recibo.pdf" href="data:application/pdf;base64,{b64}">Descargar PDF</a></p>
+      <object
+        data="data:application/pdf;base64,{b64}#zoom=page-width"
+        type="application/pdf"
+        style="
+          width: min(calc(100vw - {viewport_margin_px}px), {max_width_px}px);
+          height: min({height_vh}vh, {max_height_px}px);
+          border: none;
+          border-radius: 8px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        ">
+        <p>No se pudo mostrar el PDF.
+           <a download="recibo.pdf" href="data:application/pdf;base64,{b64}">Descargar PDF</a>
+        </p>
       </object>
     </div>
     """
@@ -162,7 +170,7 @@ def mostrar_recibos():
         return
 
     # Mantén tu layout; sólo el visor es más ancho.
-    col_izq, col_ctr, col_der = st.columns([1, 5, 1])
+    col_izq, col_ctr, col_der = st.columns([0.05, 0.9, 0.05])
     with col_ctr:
         _mostrar_pdf_centrado(pdf_bytes, max_width_px=1200, height_vh=88)
 
