@@ -24,13 +24,18 @@ def _ls_eval(js: str, want_output: bool):
 
 def ensure_ls_boot():
     """
-    Asegura que el front ya está hidratado para usar localStorage.
-    En el primer ciclo puede devolver None: cortamos y el siguiente ya está listo.
+    Espera UN ciclo a que el front esté hidratado para ejecutar JS.
+    Usa una sonda que no depende de ninguna clave de localStorage,
+    de modo que no retorna siempre null.
     """
-    probe = _ls_eval("window.localStorage.getItem('__ls_probe__')", want_output=True)
-    if probe is None:
-        st.write("🔄 Restaurando sesión…")
-        st.stop()
+    ready = streamlit_js_eval(
+        js_expressions="(() => 'ready')()",   # devuelve 'ready' cuando el componente está listo
+        key="ls_ready_boot",                  # key estable para evitar ruido de "unregistered"
+        want_output=True,
+    )
+    if ready is None:                         # primer ciclo después de cargar -> aún no hidrató
+        st.write("🔄 Restaurando sesión...")
+        st.stop()     
 
 def _ls_get_json(key: str):
     val = _ls_eval(f"window.localStorage.getItem('{key}')", want_output=True)
