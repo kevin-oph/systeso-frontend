@@ -12,21 +12,31 @@ COOKIE_NAME = "systeso_auth"   # nombre del cookie para tu app
 COOKIE_DAYS = 7                # duración del login
 
 def _cm():
-    # Un único CookieManager
+    """
+    Un único CookieManager con key estable.
+    (Los componentes de Streamlit necesitan key fija para no 'recrearse' en cada rerun).
+    """
     if "_cookie_manager" not in st.session_state:
-        st.session_state["_cookie_manager"] = stx.CookieManager()
+        st.session_state["_cookie_manager"] = stx.CookieManager(key="systeso_cm")
     return st.session_state["_cookie_manager"]
 
 def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS):
-    """
-    Guarda un cookie con expiración en 'days' días.
-    extra_streamlit_components acepta 'expires_at' como datetime.
-    """
+    """Guarda un cookie con expiración en 'days' días."""
     expires_at = datetime.utcnow() + timedelta(days=days)
     _cm().set(name, json.dumps(value), expires_at=expires_at)
 
 def _get_cookie(name: str):
+    """
+    Lee el cookie. En el PRIMER ciclo tras cargar la página, el componente
+    puede no estar 'hidratado' y devolver None. Forzamos UN rerun.
+    """
     raw = _cm().get(name)
+
+    # Si aún no está listo y no hemos hecho el rerun de hidratación, lo hacemos.
+    if raw is None and not st.session_state.get("_cookie_hydration_rerun_done"):
+        st.session_state["_cookie_hydration_rerun_done"] = True
+        st.rerun()
+
     if not raw:
         return None
     try:
@@ -35,7 +45,6 @@ def _get_cookie(name: str):
         return None
 
 def _delete_cookie(name: str):
-    # OJO: CookieManager.delete NO acepta 'path'
     _cm().delete(name)
 
 def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | None = None):
@@ -64,7 +73,7 @@ def guardar_token(token: str, rol: str, nombre: str | None = None, rfc: str | No
 def restaurar_sesion_completa():
     """
     Si no hay sesión en memoria, intenta restaurar desde cookie.
-    Llamar al inicio de app.py.
+    Llamar al inicio de app.py (ya lo haces).
     """
     if "token" in st.session_state and st.session_state["token"]:
         return  # ya hay sesión en memoria
@@ -120,7 +129,7 @@ def borrar_token():
     """
     _delete_cookie(COOKIE_NAME)
     # Limpia todos los valores de sesión relevantes
-    for k in ("token", "rol", "nombre", "rfc", "_cookie_manager"):
+    for k in ("token", "rol", "nombre", "rfc", "_cookie_manager", "_cookie_hydration_rerun_done"):
         if k in st.session_state:
             del st.session_state[k]
     st.rerun()
