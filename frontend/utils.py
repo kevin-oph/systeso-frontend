@@ -27,22 +27,30 @@ def _set_cookie(name: str, value: dict, days: int = COOKIE_DAYS):
 
 def _get_cookie(name: str):
     """
-    Lee el cookie. En el PRIMER ciclo tras cargar la página, el componente
-    puede no estar 'hidratado' y devolver None. Forzamos UN rerun.
+    Lee el cookie usando get_all() para evitar carreras donde get(name) aún
+    devuelve None tras la hidratación inicial.
+    Si el componente todavía no está listo, hacemos un único rerun.
     """
-    raw = _cm().get(name)
+    mgr = _cm()
+    all_cookies = mgr.get_all()
 
-    # Si aún no está listo y no hemos hecho el rerun de hidratación, lo hacemos.
-    if raw is None and not st.session_state.get("_cookie_hydration_rerun_done"):
+    # Aún sin hidratar → hace un solo rerun
+    if all_cookies is None and not st.session_state.get("_cookie_hydration_rerun_done"):
         st.session_state["_cookie_hydration_rerun_done"] = True
         st.rerun()
 
+    if not all_cookies:
+        return None
+
+    raw = all_cookies.get(name)
     if not raw:
         return None
+
     try:
         return json.loads(raw)
     except Exception:
         return None
+
 
 def _delete_cookie(name: str):
     _cm().delete(name)
