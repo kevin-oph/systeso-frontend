@@ -1,10 +1,7 @@
-# app.py
-import re
-import time
-import requests
-import pandas as pd
+# app.py (inicio)
 import streamlit as st
-
+import requests, re, time, pandas as pd
+import extra_streamlit_components as stx
 
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
@@ -13,51 +10,32 @@ from verificacion import verificar_email
 from reset_password import mostrar_formulario_reset
 
 from utils import (
-    boot_cookies_once,
-    restaurar_sesion_completa,
-    guardar_token,
-    obtener_token,
-    borrar_token,
-    obtener_rol,
-    EMAIL_REGEX,
-    PASSWORD_REGEX,
-    is_jwt_expired, # utils tiene helpers para exp del JWT
-    
+    guardar_token, obtener_token, borrar_token, obtener_rol,
+    restaurar_sesion_completa, EMAIL_REGEX, PASSWORD_REGEX,
+    is_jwt_expired, jwt_exp_unix
 )
 
-# ------------------------------------------------------------
-# Config global de Streamlit (debe ir lo más arriba posible)
-# ------------------------------------------------------------
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# 1) Hidratar cookies UNA vez por render
-boot_cookies_once()
+# (Opcional) Instancia única de CookieManager y cache de respaldo
+if "cookie_manager" not in st.session_state:
+    st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 
-# ------------------------------------------------------------
-# Restaurar sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
-# ------------------------------------------------------------
+cm = st.session_state["cookie_manager"]
+cookies = cm.get_all(key="boot_cache")
+if cookies is None:
+    st.stop()  # primer ciclo: hidratar componente
+st.session_state["_cookies_cache"] = cookies  # por si el cookie fuera necesario
+
+# 1) Restaurar sesión desde localStorage (y si no, desde cookie)
 restaurar_sesion_completa()
 
-st.caption(f"cookie_cache_keys: {list(st.session_state.get('_cookies_cache', {}).keys())}")
-st.caption(f"has_token_in_state: {bool(st.session_state.get('token'))}")
-st.caption(f"view: {st.session_state.get('view')}")
-
-# (opcional) estado del JWT
-from utils import is_jwt_expired, jwt_exp_unix
-tok = obtener_token()
-if tok:
-    import time
-    st.caption(f"jwt exp: {jwt_exp_unix(tok)} | now: {int(time.time())} | expired?: {is_jwt_expired(tok)}")
-
-# Leer token/rol ya restaurados
+# 2) Token/rol ya deberían estar cargados
 token = obtener_token()
 rol_guardado = obtener_rol()
 
-
-# ------------------------------------------------------------
-# Enlaces especiales (reset/verificación) — se permiten sin sesión
-# ------------------------------------------------------------
+# Links especiales (verificación / reset)
 params = st.query_params
 if "reset_password" in params and "token" in params:
     mostrar_formulario_reset(params["token"])
@@ -66,6 +44,13 @@ if "token" in params:
     verificar_email()
     st.stop()
 
+# (diagnóstico opcional)
+tok = obtener_token()
+st.caption(f"cookie_cache_keys: {list(st.session_state.get('_cookies_cache', {}).keys())}")
+st.caption(f"has_token_in_state: {bool(tok)}")
+st.caption(f"view: {st.session_state.get('view', 'login')}")
+if tok:
+    st.caption(f"jwt exp: {jwt_exp_unix(tok)} | now: {int(time.time())} | expired?: {is_jwt_expired(tok)}")
 
 # ------------------------------------------------------------
 # CSS (tu estilo original)
