@@ -4,7 +4,7 @@ import time
 import requests
 import pandas as pd
 import streamlit as st
-import extra_streamlit_components as stx
+
 
 from auth import login_user, register_user
 from recibos import mostrar_recibos, subir_zip
@@ -34,8 +34,13 @@ BASE_URL = "https://systeso-backend-production.up.railway.app"
 boot_cookies_once()
 
 # ------------------------------------------------------------
-# BOOT COOKIES: una sola instancia + get_all() una sola vez
+# Restaurar sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
 # ------------------------------------------------------------
+restaurar_sesion_completa()
+
+# Leer token/rol ya restaurados
+token = obtener_token()
+rol_guardado = obtener_rol()
 
 
 # ------------------------------------------------------------
@@ -49,14 +54,6 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-# ------------------------------------------------------------
-# Restaurar sesión desde cookie (pone token/rol/nombre/rfc y view="recibos" si estaba en login)
-# ------------------------------------------------------------
-restaurar_sesion_completa()
-
-# Leer token/rol ya restaurados
-token = obtener_token()
-rol_guardado = obtener_rol()
 
 # ------------------------------------------------------------
 # CSS (tu estilo original)
