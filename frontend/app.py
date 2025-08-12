@@ -12,7 +12,7 @@ from reset_password import mostrar_formulario_reset
 from utils import (
     guardar_token, obtener_token, borrar_token, obtener_rol,
     restaurar_sesion_completa, EMAIL_REGEX, PASSWORD_REGEX,
-    is_jwt_expired, jwt_exp_unix
+    is_jwt_expired, jwt_exp_unix, ensure_ls_boot
 )
 
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
@@ -28,10 +28,10 @@ cm = st.session_state["cookie_manager"]
 boot_key = st.session_state.get("cm_boot_key", "boot_static")
 cookies = cm.get_all(key=boot_key)
 if cookies is None:
-    st.write("🔄 Restaurando sesión...")
     st.stop()
-
 st.session_state["_cookies_cache"] = cookies
+
+ensure_ls_boot()
 
 # 1) Restaurar sesión desde localStorage (y si no, desde cookie)
 restaurar_sesion_completa()
