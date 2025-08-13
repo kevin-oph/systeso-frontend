@@ -263,7 +263,7 @@ if token:
 # ------------------- LOGIN -------------------
 elif st.session_state.view == "login":
     
-    st.title("Sistema de Recibos de Nómina", icon="📄")
+    st.title("Sistema de Recibos de Nómina 📄")
     st.markdown("### Iniciar sesión para continuar")
     st.subheader("🔐 Iniciar Sesión", divider="grey")
 
