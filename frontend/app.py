@@ -263,7 +263,7 @@ if token:
 # ------------------- LOGIN -------------------
 elif st.session_state.view == "login":
     
-    st.title("Consulta tus Recibos de Nómina 📄")
+    st.title("Consulta tus Recibos de Nómina")
     st.subheader("🔐 Iniciar Sesión", divider="grey")
 
     if st.session_state.reset_login_fields:
@@ -335,7 +335,8 @@ elif st.session_state.view == "login":
 
 # ------------------- REGISTRO -------------------
 elif st.session_state.view == "register":
-    st.subheader("📝 Registro de usuario", divider="grey")
+    st.title("Crea tu cuenta para consultar tus recibos")
+    st.subheader("📝 Registrate aqui", divider="grey")
 
     if st.session_state.reset_register_fields:
         st.session_state.register_email = ""
