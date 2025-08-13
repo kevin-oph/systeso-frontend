@@ -9,13 +9,14 @@ import extra_streamlit_components as stx
 from urllib.parse import unquote
 
 from utils import (
-    COOKIE_NAME,          # nombre del cookie persistente
-    borrar_token,         # borra cookie + limpia sesión + rerun
-    guardar_token,        # se usa al hacer login (no aquí)
+    COOKIE_NAME,
+    borrar_token,
+    guardar_token,
     EMAIL_REGEX,
     PASSWORD_REGEX,
     jwt_exp_unix,
     is_jwt_expired,
+    
 )
 
 from auth import login_user, register_user
@@ -29,19 +30,18 @@ st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
 # ------------------- BOOT DE COOKIES -------------------
-# 1) Instancia ÚNICA del CookieManager (key estable). No lo crees en más lugares.
+# 1) Instancia ÚNICA del CookieManager
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 cm = st.session_state["cookie_manager"]
 
 # 2) Lee TODOS los cookies UNA sola vez por render.
-#    En el primer ciclo tras cargar/recargar la página puede devolver None → cortamos ese render.
 cookies = cm.get_all(key="boot")
 if cookies is None:
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# 3) Opcional: guarda el dict en caché para utilidades que lean cookies en este mismo render.
+# (opcional) cache para utilidades que lean cookies en este mismo render
 st.session_state["_cookies_cache"] = cookies
 
 # ------------------- HIDRATAR SESIÓN DESDE COOKIE -------------------
@@ -49,10 +49,9 @@ raw = cookies.get(COOKIE_NAME)
 payload = None
 
 if isinstance(raw, dict):
-    # Algunas versiones del componente ya devuelven el valor como dict
     payload = raw
 elif isinstance(raw, str):
-    # Otras lo devuelven string (a veces URL-encodado). Probamos ambas variantes.
+    # A veces llega URL-encodado; probamos crudo y decodificado
     for candidate in (raw, unquote(raw)):
         try:
             payload = json.loads(candidate)
@@ -61,7 +60,7 @@ elif isinstance(raw, str):
             pass
 
 if payload:
-    # Si todavía no hay sesión en memoria, hidrátala desde el cookie
+    # Si aún no hay sesión en memoria, hidratar desde cookie
     if not st.session_state.get("token"):
         st.session_state["token"]  = payload.get("token", "")
         st.session_state["rol"]    = payload.get("rol", "")
@@ -71,18 +70,29 @@ if payload:
     if st.session_state.get("view") in (None, "", "login"):
         st.session_state["view"] = "recibos"
 else:
-    # No hay cookie válido → asegura memoria limpia y manda a login
-    for k in ("token", "rol", "nombre", "rfc"):
-        st.session_state.pop(k, None)
-    st.session_state["view"] = "login"
+    # ❗ Si NO hay cookie…
+    if st.session_state.get("token"):
+        # …pero SÍ hay token en memoria (acabas de loguearte): NO borres la sesión.
+        pass
+    else:
+        # …y tampoco hay token en memoria → fuerza login
+        for k in ("token", "rol", "nombre", "rfc"):
+            st.session_state.pop(k, None)
+        st.session_state["view"] = "login"
 
 # ------------------- TOKEN VIVO EN MEMORIA -------------------
 token = st.session_state.get("token", "")
-# Corte temprano si el JWT ya venció (evita “rebotes” a login al refrescar)
+rol_guardado = st.session_state.get("rol", "")  # <- añade esta línea
+
+# Chequeo temprano de expiración (solo si hay token)
 if token and is_jwt_expired(token):
     borrar_token()
     st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
     st.stop()
+
+# Si hay token pero la vista quedó en 'login', ve a 'recibos'
+if token and st.session_state.get("view") == "login":
+    st.session_state["view"] = "recibos"
 
 # ------------------- ENLACES ESPECIALES -------------------
 params = st.query_params
@@ -93,7 +103,7 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-# ------------------- DIAGNÓSTICO (opcional; puedes comentar estas líneas) -------------------
+# ------------------- (opc) Diagnóstico rápido -------------------
 st.caption(f"cookie_keys: {list(cookies.keys())}")
 st.caption(f"has_token_in_state: {bool(token)}")
 st.caption(f"view: {st.session_state.get('view', 'login')}")
@@ -102,7 +112,6 @@ if token:
         st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
     except Exception:
         pass
-
 # ------------------- ESTILOS -------------------
 st.markdown("""
 <style>
