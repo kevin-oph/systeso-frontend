@@ -203,7 +203,7 @@ def subir_zip():
                     "https://systeso-backend-production.up.railway.app/recibos/upload_zip",
                     headers=headers,
                     files=files,
-                    timeout=120,
+                    timeout=(15, 600),
                     allow_redirects=True
                 )
             except requests.RequestException as e:
