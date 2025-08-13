@@ -34,33 +34,48 @@ cm = st.session_state["cookie_manager"]
 # Lee cookies UNA sola vez por render (el primer ciclo puede ser None)
 cookies = cm.get_all(key="boot")
 if cookies is None:
-    # Primer render tras carga/recarga: el componente aún no hidrata
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# Popular cache (por si utils los necesita en este render)
+# Popular cache (por si utils los usa en este render)
 st.session_state["_cookies_cache"] = cookies
 
-# Hidrata la sesión desde el cookie si hace falta (NO borres sesión si el cookie aún no está)
-raw = cookies.get(COOKIE_NAME)
-if raw:
-    payload = None
-    # El componente suele URL-encodar el valor; probamos crudo y decodificado
-    for candidate in (raw, unquote(raw)):
-        try:
-            payload = json.loads(candidate)
-            break
-        except Exception:
-            pass
-    if payload and not st.session_state.get("token"):
-        st.session_state["token"]  = payload.get("token", "")
-        st.session_state["rol"]    = payload.get("rol", "")
-        st.session_state["nombre"] = payload.get("nombre", "Empleado")
-        st.session_state["rfc"]    = payload.get("rfc", "")
-        if st.session_state.get("view") in (None, "", "login"):
-            st.session_state["view"] = "recibos"
-# 👇 IMPORTANTE: si raw no existe NO limpiamos la sesión aquí.
-# Pueden darse “carreras” breves donde el cookie aún no llega; no te saco por eso.
+# Hidrata la sesión desde el cookie si hace falta (sin limpiar si aún no llega)
+raw = cookies.get(COOKIES_NAME if False else COOKIE_NAME)  # usa COOKIE_NAME (de utils)
+
+payload = None
+if raw is not None:
+    try:
+        if isinstance(raw, dict):
+            # ya viene decodificado como dict
+            payload = raw
+        elif isinstance(raw, (bytes, bytearray)):
+            # venía como bytes → decodificar y parsear
+            payload = json.loads(raw.decode("utf-8", "ignore"))
+        elif isinstance(raw, str):
+            # normalmente es string; probamos crudo y URL-decoded
+            tried = [raw]
+            try:
+                tried.append(unquote(raw))
+            except Exception:
+                pass
+            for candidate in tried:
+                try:
+                    payload = json.loads(candidate)
+                    break
+                except Exception:
+                    continue
+    except Exception:
+        payload = None
+
+if payload and not st.session_state.get("token"):
+    st.session_state["token"]  = payload.get("token", "")
+    st.session_state["rol"]    = payload.get("rol", "")
+    st.session_state["nombre"] = payload.get("nombre", "Empleado")
+    st.session_state["rfc"]    = payload.get("rfc", "")
+    if st.session_state.get("view") in (None, "", "login"):
+        st.session_state["view"] = "recibos"
+# 👆 Si no hubo payload, NO limpies la sesión aquí. Puede ser una carrera de hidratación.
 
 # Usa SIEMPRE el token vivo del session_state
 token        = st.session_state.get("token", "")
