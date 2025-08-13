@@ -98,14 +98,14 @@ if "token" in params:
 
 # ------------------- (opc) Diagnóstico rápido -------------------
 # Puedes comentar estas líneas cuando ya no las necesites.
-st.caption(f"cookie_keys: {list(cookies.keys())}")
-st.caption(f"has_token_in_state: {bool(token)}")
-st.caption(f"view: {st.session_state.get('view', 'login')}")
-if token:
-    try:
-        st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
-    except Exception:
-        pass
+#st.caption(f"cookie_keys: {list(cookies.keys())}")
+#st.caption(f"has_token_in_state: {bool(token)}")
+#st.caption(f"view: {st.session_state.get('view', 'login')}")
+#if token:
+#    try:
+#        st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
+#    except Exception:
+#        pass
 
 # ------------------- ESTILOS -------------------
 st.markdown("""
@@ -262,6 +262,9 @@ if token:
 
 # ------------------- LOGIN -------------------
 elif st.session_state.view == "login":
+    
+    st.title("Sistema de Recibos de Nómina", icon="📄")
+    st.markdown("### Iniciar sesión para continuar")
     st.subheader("🔐 Iniciar Sesión", divider="grey")
 
     if st.session_state.reset_login_fields:
