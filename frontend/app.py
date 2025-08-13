@@ -9,9 +9,9 @@ import extra_streamlit_components as stx
 from urllib.parse import unquote
 
 from utils import (
-    COOKIE_NAME,
-    borrar_token,
-    guardar_token,
+    COOKIE_NAME,          # nombre del cookie persistente
+    borrar_token,         # borra cookie + limpia sesión + rerun
+    guardar_token,        # se usa al hacer login (no aquí)
     EMAIL_REGEX,
     PASSWORD_REGEX,
     jwt_exp_unix,
@@ -28,74 +28,57 @@ from reset_password import mostrar_formulario_reset
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# Instancia única del CookieManager (key estable)
+# ------------------- BOOT DE COOKIES -------------------
+# 1) Instancia ÚNICA del CookieManager (key estable). No lo crees en más lugares.
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 cm = st.session_state["cookie_manager"]
 
-# Lee cookies UNA sola vez por render (el primer ciclo puede ser None)
+# 2) Lee TODOS los cookies UNA sola vez por render.
+#    En el primer ciclo tras cargar/recargar la página puede devolver None → cortamos ese render.
 cookies = cm.get_all(key="boot")
 if cookies is None:
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# Popular cache para utilidades que aún lean de aquí
+# 3) Opcional: guarda el dict en caché para utilidades que lean cookies en este mismo render.
 st.session_state["_cookies_cache"] = cookies
 
-# --- Helper robusto para parsear el cookie ---
-def _parse_cookie_value(raw):
-    """Devuelve dict con el payload del cookie o None si no se pudo parsear."""
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, (bytes, bytearray)):
+# ------------------- HIDRATAR SESIÓN DESDE COOKIE -------------------
+raw = cookies.get(COOKIE_NAME)
+payload = None
+
+if isinstance(raw, dict):
+    # Algunas versiones del componente ya devuelven el valor como dict
+    payload = raw
+elif isinstance(raw, str):
+    # Otras lo devuelven string (a veces URL-encodado). Probamos ambas variantes.
+    for candidate in (raw, unquote(raw)):
         try:
-            raw = raw.decode("utf-8", "ignore")
+            payload = json.loads(candidate)
+            break
         except Exception:
-            return None
-    if not isinstance(raw, str):
-        return None
+            pass
 
-    candidates = [raw]
-    # URL-encoded (%7B...%7D)
-    try:
-        candidates.append(unquote(raw))
-    except Exception:
-        pass
-    # Entrecomillado ("{...}")
-    if raw.startswith('"') and raw.endswith('"'):
-        candidates.append(raw[1:-1])
-
-    for c in candidates:
-        try:
-            return json.loads(c)
-        except Exception:
-            continue
-    return None
-
-# Hidratar sesión desde cookie (si procede)
-data = _parse_cookie_value(cookies.get(COOKIE_NAME))
-
-if data:
+if payload:
+    # Si todavía no hay sesión en memoria, hidrátala desde el cookie
     if not st.session_state.get("token"):
-        st.session_state["token"]  = data.get("token", "")
-        st.session_state["rol"]    = data.get("rol", "")
-        st.session_state["nombre"] = data.get("nombre", "Empleado")
-        st.session_state["rfc"]    = data.get("rfc", "")
+        st.session_state["token"]  = payload.get("token", "")
+        st.session_state["rol"]    = payload.get("rol", "")
+        st.session_state["nombre"] = payload.get("nombre", "Empleado")
+        st.session_state["rfc"]    = payload.get("rfc", "")
+    # Si la vista estaba vacía o en login, pasa a 'recibos'
     if st.session_state.get("view") in (None, "", "login"):
         st.session_state["view"] = "recibos"
 else:
-    # Sin cookie válido → limpiar y forzar login
+    # No hay cookie válido → asegura memoria limpia y manda a login
     for k in ("token", "rol", "nombre", "rfc"):
         st.session_state.pop(k, None)
     st.session_state["view"] = "login"
 
-# Usa SIEMPRE el token/rol vivos en session_state
-token        = st.session_state.get("token", "")
-rol_guardado = st.session_state.get("rol", "")
-
-# Guard temprano: si el JWT venció, salir ordenadamente
+# ------------------- TOKEN VIVO EN MEMORIA -------------------
+token = st.session_state.get("token", "")
+# Corte temprano si el JWT ya venció (evita “rebotes” a login al refrescar)
 if token and is_jwt_expired(token):
     borrar_token()
     st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
@@ -110,8 +93,8 @@ if "token" in params:
     verificar_email()
     st.stop()
 
-# ------------------- (opc) Diagnóstico rápido -------------------
-st.caption(f"cookie_cache_keys: {list(cookies.keys())}")
+# ------------------- DIAGNÓSTICO (opcional; puedes comentar estas líneas) -------------------
+st.caption(f"cookie_keys: {list(cookies.keys())}")
 st.caption(f"has_token_in_state: {bool(token)}")
 st.caption(f"view: {st.session_state.get('view', 'login')}")
 if token:
