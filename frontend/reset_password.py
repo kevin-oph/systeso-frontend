@@ -7,7 +7,7 @@ BACKEND_BASE = "https://systeso-backend-production.up.railway.app"
 def mostrar_formulario_reset(token: str):
     st.title("🔑 Restablecer Contraseña")
 
-    # Usamos un form para submit y así evitar modificar session_state de los widgets
+    # Form: evita tocar keys de widgets directamente
     with st.form("reset_form", clear_on_submit=True):
         nueva = st.text_input("Nueva contraseña", type="password", key="reset_pass")
         confirmar = st.text_input("Confirmar contraseña", type="password", key="reset_pass_confirm")
@@ -16,15 +16,11 @@ def mostrar_formulario_reset(token: str):
     if not submit:
         return
 
-    # Validaciones básicas
     if not nueva or not confirmar:
-        st.warning("Debes llenar ambos campos.")
-        return
+        st.warning("Debes llenar ambos campos."); return
     if nueva != confirmar:
-        st.error("Las contraseñas no coinciden.")
-        return
+        st.error("Las contraseñas no coinciden."); return
 
-    # Llamada al backend
     with st.spinner("Procesando..."):
         try:
             resp = requests.post(
@@ -33,18 +29,16 @@ def mostrar_formulario_reset(token: str):
                 timeout=20,
             )
         except requests.RequestException as e:
-            st.error(f"Error de red: {e}")
-            return
+            st.error(f"Error de red: {e}"); return
 
     if resp.status_code == 200:
-        # Guardamos un 'flash' para mostrarlo al cargar la vista de login
+        # Flash para login + redirección
         st.session_state["_flash_login"] = ("success", "Contraseña cambiada correctamente. Ya puedes iniciar sesión.")
-        # Limpia los query params para que no re-entre al flujo de reset
         try:
-            st.query_params()
+            # limpiar query params (nuevo API)
+            st.query_params.clear()
         except Exception:
             pass
-        # Redirige a la vista de login
         st.session_state["view"] = "login"
         st.rerun()
     else:

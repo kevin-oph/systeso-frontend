@@ -9,9 +9,9 @@ import extra_streamlit_components as stx
 from urllib.parse import unquote
 
 from utils import (
-    COOKIE_NAME,          # nombre del cookie persistente
-    guardar_token,        # guarda token + datos en cookie y session_state
-    borrar_token,         # cierra sesión (borra cookie + limpia estado)
+    COOKIE_NAME,
+    guardar_token,
+    borrar_token,
     EMAIL_REGEX, PASSWORD_REGEX,
     jwt_exp_unix, is_jwt_expired,
 )
@@ -26,34 +26,27 @@ from reset_password import mostrar_formulario_reset
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
 BASE_URL = "https://systeso-backend-production.up.railway.app"
 
-# ------------------- BOOT COOKIES (una sola instancia/lectura) -------------------
+# ------------------- BOOT COOKIES -------------------
 if "cookie_manager" not in st.session_state:
     st.session_state["cookie_manager"] = stx.CookieManager(key="systeso_cm")
 cm = st.session_state["cookie_manager"]
 
-# Lee cookies UNA sola vez por render (el primer ciclo puede ser None)
 cookies = cm.get_all(key="boot")
 if cookies is None:
     st.empty().write("🔄 Restaurando sesión...")
     st.stop()
 
-# Popular cache (por si utils los usa en este render)
 st.session_state["_cookies_cache"] = cookies
 
-# Hidrata la sesión desde el cookie si hace falta (sin limpiar si aún no llega)
-raw = cookies.get(COOKIES_NAME if False else COOKIE_NAME)  # usa COOKIE_NAME (de utils)
-
+raw = cookies.get(COOKIE_NAME)
 payload = None
 if raw is not None:
     try:
         if isinstance(raw, dict):
-            # ya viene decodificado como dict
             payload = raw
         elif isinstance(raw, (bytes, bytearray)):
-            # venía como bytes → decodificar y parsear
             payload = json.loads(raw.decode("utf-8", "ignore"))
         elif isinstance(raw, str):
-            # normalmente es string; probamos crudo y URL-decoded
             tried = [raw]
             try:
                 tried.append(unquote(raw))
@@ -61,8 +54,7 @@ if raw is not None:
                 pass
             for candidate in tried:
                 try:
-                    payload = json.loads(candidate)
-                    break
+                    payload = json.loads(candidate); break
                 except Exception:
                     continue
     except Exception:
@@ -75,13 +67,11 @@ if payload and not st.session_state.get("token"):
     st.session_state["rfc"]    = payload.get("rfc", "")
     if st.session_state.get("view") in (None, "", "login"):
         st.session_state["view"] = "recibos"
-# 👆 Si no hubo payload, NO limpies la sesión aquí. Puede ser una carrera de hidratación.
 
-# Usa SIEMPRE el token vivo del session_state
 token        = st.session_state.get("token", "")
 rol_guardado = st.session_state.get("rol", "")
 
-# ---- Corte temprano si el JWT ya expiró ----
+# Expiración JWT
 if token and is_jwt_expired(token):
     borrar_token()
     st.warning("Tu sesión expiró. Vuelve a iniciar sesión.")
@@ -95,17 +85,6 @@ if "reset_password" in params and "token" in params:
 if "token" in params:
     verificar_email()
     st.stop()
-
-# ------------------- (opc) Diagnóstico rápido -------------------
-# Puedes comentar estas líneas cuando ya no las necesites.
-#st.caption(f"cookie_keys: {list(cookies.keys())}")
-#st.caption(f"has_token_in_state: {bool(token)}")
-#st.caption(f"view: {st.session_state.get('view', 'login')}")
-#if token:
-#    try:
-#        st.caption(f"jwt exp: {jwt_exp_unix(token)} | now: {int(time.time())} | expired?: {is_jwt_expired(token)}")
-#    except Exception:
-#        pass
 
 # ------------------- ESTILOS -------------------
 st.markdown("""
@@ -152,7 +131,6 @@ for k, v in init_keys:
         st.session_state[k] = v
 
 # ------------------- COMPLETAR DATOS (suave) -------------------
-# No te saco por fallos de red/5xx. Solo cierro si el JWT está vencido (arriba).
 if token and "rol" not in st.session_state:
     try:
         headers = {"Authorization": f"Bearer {token}"}
@@ -165,54 +143,41 @@ if token and "rol" not in st.session_state:
         elif r.status_code in (401, 403):
             borrar_token()
             st.warning("Tu sesión expiró o no es válida. Inicia sesión nuevamente.")
-        # otros códigos → mantén sesión
     except requests.RequestException:
-        # problema de red → mantén sesión como está
         pass
 
 # ------------------- HISTORIAL DE CARGAS (ADMIN) -------------------
 def mostrar_historial_cargas():
     tok = st.session_state.get("token")
     if not tok:
-        st.warning("No tienes sesión activa.")
-        return
-
+        st.warning("No tienes sesión activa."); return
     headers = {"Authorization": f"Bearer {tok}"}
     try:
         response = requests.get(f"{BASE_URL}/empleados/historial_cargas", headers=headers, timeout=15)
     except Exception as e:
-        st.error(f"Error de red: {e}")
-        return
+        st.error(f"Error de red: {e}"); return
 
     if response.status_code == 200:
         historial = response.json()
         st.markdown("### 📂 Historial de archivos Excel cargados:")
         if historial:
             df = pd.DataFrame(historial).rename(
-                columns={
-                    "nombre_archivo": "Nombre del archivo",
-                    "fecha_carga": "Fecha y hora",
-                    "usuario": "Usuario",
-                }
+                columns={"nombre_archivo":"Nombre del archivo","fecha_carga":"Fecha y hora","usuario":"Usuario"}
             )
             df["Fecha y hora"] = pd.to_datetime(df["Fecha y hora"])
-
             col1, col2, col3 = st.columns(3)
             usuarios = df["Usuario"].unique().tolist()
             usuario_sel = col1.selectbox("Filtrar por usuario", options=["Todos"] + usuarios, key="sel_hist_user")
             if usuario_sel != "Todos":
                 df = df[df["Usuario"] == usuario_sel]
-
             fechas = df["Fecha y hora"].dt.date.unique()
             if len(fechas) > 0:
                 fecha_ini = col2.date_input("Desde", value=min(fechas), key="date_hist_from")
                 fecha_fin = col3.date_input("Hasta", value=max(fechas), key="date_hist_to")
                 df = df[(df["Fecha y hora"].dt.date >= fecha_ini) & (df["Fecha y hora"].dt.date <= fecha_fin)]
-
             nombre_buscar = st.text_input("Buscar archivo por nombre", key="txt_hist_search")
             if nombre_buscar:
                 df = df[df["Nombre del archivo"].str.contains(nombre_buscar, case=False, na=False)]
-
             st.dataframe(df.sort_values("Fecha y hora", ascending=False), use_container_width=True)
         else:
             st.info("No hay archivos registrados todavía.")
@@ -249,7 +214,7 @@ if token:
 
         st.markdown("###")
         if st.button("🚪 Cerrar sesión", use_container_width=True, key="btn_logout"):
-            borrar_token()  # limpia cookie + session_state y hace rerun
+            borrar_token()
 
     if st.session_state.view == "subir_zip" and rol == "admin":
         subir_zip()
@@ -262,7 +227,13 @@ if token:
 
 # ------------------- LOGIN -------------------
 elif st.session_state.view == "login":
-    
+    # 👇 Mostrar 'flash' si viene de recuperar/restablecer contraseña o registro
+    flash = st.session_state.pop("_flash_login", None)
+    if flash:
+        kind, text = flash  # "success" | "info" | "warning" | "error"
+        getattr(st, kind)(text)
+        st.toast("✅ Operación completada.")
+
     st.title("Consulta tus Recibos de Nómina")
     st.subheader("🔐 Iniciar Sesión", divider="grey")
 
@@ -291,7 +262,6 @@ elif st.session_state.view == "login":
                     if "access_token" in result:
                         st.session_state.reset_login_fields = True
                         guardar_token(result["access_token"], result["rol"], result.get("nombre"), result.get("rfc"))
-                        # guardar_token -> set cookie + state + rerun
                     elif result.get("error") == "no_verificado":
                         st.session_state.mostrar_reenvio = True
                         st.warning("⚠️ Tu correo aún no ha sido verificado. Puedes reenviar la verificación abajo.")
@@ -422,21 +392,28 @@ elif st.session_state.view == "recuperar_password":
         st.session_state.reset_email = ""
         st.session_state.reset_reset_fields = False
 
-    email_reset = st.text_input(
-        "📧 Ingresa tu correo registrado para restablecer tu contraseña",
-        value=st.session_state.reset_email,
-        key="reset_email",
-    )
-    if st.button("📨 Enviar enlace de recuperación", key="btn_send_reset"):
+    # Form para enviar enlace y, si ok, redirigir a login con flash
+    with st.form("solicitar_reset_form", clear_on_submit=True):
+        email_reset = st.text_input(
+            "📧 Ingresa tu correo registrado para restablecer tu contraseña",
+            value=st.session_state.reset_email,
+            key="reset_email",
+        )
+        send = st.form_submit_button("📨 Enviar enlace de recuperación")
+
+    if send:
         if not email_reset:
             st.warning("Debes ingresar un correo.")
         else:
             with st.spinner("Enviando correo..."):
                 try:
                     resp = requests.post(f"{BASE_URL}/users/solicitar_reset", json={"email": email_reset}, timeout=15)
-                    if resp.status_code == 200:
-                        st.success("✅ Se ha enviado el enlace de recuperación. Revisa tu correo.")
-                        st.toast("📬 Solicitud enviada.")
+                    if resp.status_code in (200, 202):
+                        # 👉 Guardar 'flash' para mostrar en login y redirigir
+                        st.session_state["_flash_login"] = (
+                            "success",
+                            "Te enviamos un enlace de recuperación a tu correo (si existe en el sistema). Revisa tu bandeja y spam."
+                        )
                         st.session_state.reset_reset_fields = True
                         st.session_state.view = "login"
                         st.rerun()
