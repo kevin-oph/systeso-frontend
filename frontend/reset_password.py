@@ -41,7 +41,7 @@ def mostrar_formulario_reset(token: str):
         st.session_state["_flash_login"] = ("success", "Contraseña cambiada correctamente. Ya puedes iniciar sesión.")
         # Limpia los query params para que no re-entre al flujo de reset
         try:
-            st.experimental_set_query_params()
+            st.query_params()
         except Exception:
             pass
         # Redirige a la vista de login
