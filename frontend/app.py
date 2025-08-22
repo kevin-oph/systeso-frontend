@@ -250,6 +250,28 @@ elif st.session_state.view == "login":
     password = st.text_input("🔑 Contraseña", type="password", value=st.session_state.login_password, key="login_password")
 
     col1, col2 = st.columns([1, 1])
+    
+       
+    def _emit_validation(detail):
+    # "detail" puede venir como dict {"detail":[...]} o ya como lista
+        items = detail.get("detail", detail) if isinstance(detail, dict) else detail
+        if not isinstance(items, list):
+            st.error("❌ No pudimos validar los datos. Revisa el correo y la contraseña.")
+            return
+
+        for err in items:
+            loc = [p for p in err.get("loc", []) if p != "body"]
+            field = ".".join(loc) if loc else ""
+            msg = err.get("msg", "Dato inválido")
+
+            if field == "email" and "valid email" in msg:
+                st.error("📧 El correo no es válido. Ejemplo: persona@dominio.com")
+            elif field == "password" and ("field required" in msg or "none is not an allowed value" in msg):
+                st.error("🔐 La contraseña es obligatoria.")
+            else:
+                st.error(f"❌ {(field.capitalize() + ': ') if field else ''}{msg}")
+
+
     with col1:
         if st.button("🔓 Ingresar", key="btn_login"):
             if not email or not password:
@@ -258,50 +280,61 @@ elif st.session_state.view == "login":
                 with st.spinner("🔄 Validando credenciales..."):
                     result = login_user(email, password)
 
-                if result and isinstance(result, dict):
-                    if "access_token" in result:
-                        st.session_state.reset_login_fields = True
-                        guardar_token(result["access_token"], result["rol"], result.get("nombre"), result.get("rfc"))
-                    elif result.get("error") == "no_verificado":
+                # Manejo de resultados
+                if not isinstance(result, dict):
+                    st.error("❌ Error desconocido. Intenta de nuevo.")
+                elif "access_token" in result:
+                    st.session_state.reset_login_fields = True
+                    guardar_token(
+                        result["access_token"],
+                        result["rol"],
+                        result.get("nombre"),
+                        result.get("rfc"),
+                    )
+                else:
+                    err = result.get("error")
+                    if err == "no_verificado":
                         st.session_state.mostrar_reenvio = True
                         st.warning("⚠️ Tu correo aún no ha sido verificado. Puedes reenviar la verificación abajo.")
-                    elif result.get("error") == "credenciales_invalidas":
-                        st.error("❌ Credenciales incorrectas. Revisa tu usuario y contraseña.")
-                    elif result.get("error") == "otro_error":
-                        st.error(f"❌ Error: {result.get('detail', 'Ocurrió un problema.')}")
-                    elif result.get("error") == "conexion":
+                    elif err == "credenciales_invalidas":
+                        st.error("❌ Credenciales incorrectas. Revisa tu correo y contraseña.")
+                    elif err == "validacion":
+                        _emit_validation(result.get("detail"))
+                    elif err == "conexion":
                         st.error(f"⚠️ Error de conexión con el servidor: {result.get('detail')}")
-                else:
-                    st.error("❌ Error desconocido. Intenta de nuevo.")
+                    else:
+                        # "otro_error" u otro caso
+                        detail = result.get("detail")
+                        st.error(f"❌ Ocurrió un problema al iniciar sesión. {detail if isinstance(detail, str) else ''}")
 
-    with col2:
-        if st.button("📝 Crear cuenta", key="btn_to_register"):
-            st.session_state.view = "register"
+        with col2:
+            if st.button("📝 Crear cuenta", key="btn_to_register"):
+                st.session_state.view = "register"
+                st.session_state.reset_login_fields = True
+                st.rerun()
+
+        st.markdown("---")
+
+        if st.button("¿Olvidaste tu contraseña?", key="btn_to_forgot"):
+            st.session_state.view = "recuperar_password"
             st.session_state.reset_login_fields = True
             st.rerun()
 
-    st.markdown("---")
-
-    if st.button("¿Olvidaste tu contraseña?", key="btn_to_forgot"):
-        st.session_state.view = "recuperar_password"
-        st.session_state.reset_login_fields = True
-        st.rerun()
-
-    if st.session_state.get("mostrar_reenvio", False):
-        if st.button("📩 Reenviar correo de verificación", key="btn_resend_verify"):
-            with st.spinner("📨 Reenviando correo..."):
-                try:
-                    response = requests.post(f"{BASE_URL}/users/reenviar_verificacion", json={"email": email}, timeout=15)
-                    if response.status_code == 200:
-                        st.success("✅ Correo reenviado. Revisa tu bandeja de entrada.")
-                        st.toast("📬 Verificación reenviada exitosamente.")
-                        st.session_state.mostrar_reenvio = False
-                    else:
-                        st.error("❌ No se pudo reenviar el correo. Intenta más tarde.")
-                        st.toast("⚠️ Falló el intento de reenvío.")
-                except Exception as e:
-                    st.error(f"⚠️ Error al contactar backend: {e}")
-                    st.toast("🔌 Error de conexión.")
+        if st.session_state.get("mostrar_reenvio", False):
+            if st.button("📩 Reenviar correo de verificación", key="btn_resend_verify"):
+                with st.spinner("📨 Reenviando correo..."):
+                    try:
+                        response = requests.post(f"{BASE_URL}/users/reenviar_verificacion", json={"email": email}, timeout=15)
+                        if response.status_code == 200:
+                            st.success("✅ Correo reenviado. Revisa tu bandeja de entrada.")
+                            st.toast("📬 Verificación reenviada exitosamente.")
+                            st.session_state.mostrar_reenvio = False
+                        else:
+                            st.error("❌ No se pudo reenviar el correo. Intenta más tarde.")
+                            st.toast("⚠️ Falló el intento de reenvío.")
+                    except Exception as e:
+                        st.error(f"⚠️ Error al contactar backend: {e}")
+                        st.toast("🔌 Error de conexión.")
 
 # ------------------- REGISTRO -------------------
 elif st.session_state.view == "register":

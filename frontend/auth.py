@@ -3,38 +3,32 @@ import re
 import requests
 from utils import EMAIL_REGEX, PASSWORD_REGEX
 
-BASE_URL = "https://systeso-backend-production.up.railway.app"
+BASE_URL = "https://api.zapatamorelos.gob.mx"
 
-def login_user(email, password):
+def login_user(email: str, password: str):
     try:
-        response = requests.post(f"{BASE_URL}/users/login", json={
-            "email": email,
-            "password": password
-        })
-
-        if response.status_code == 200:
-            return response.json()
-
-        # Detectar si es por correo no verificado
-        if response.status_code == 401:
-            detail = response.json().get("detail", "")
-            if "no verificado" in detail.lower():
-                return {"error": "no_verificado", "email": email}
-            else:
-                # Cubre credenciales incorrectas, usuario no existe, etc.
-                return {"error": "credenciales_invalidas", "detail": detail}
-
-        # Cubre otros posibles errores del backend
-        else:
-            try:
-                detail = response.json().get("detail", f"Error {response.status_code}")
-            except Exception:
-                detail = f"Error desconocido ({response.status_code})"
-            return {"error": "otro_error", "detail": detail}
-
-    except Exception as e:
-        # Retornar mensaje de error por excepción de red, etc.
+        r = requests.post(f"{BASE_URL}/users/login",
+                          json={"email": email, "password": password},
+                          timeout=15)
+    except requests.RequestException as e:
         return {"error": "conexion", "detail": str(e)}
+
+    if r.status_code == 200:
+        return r.json()
+
+    if r.status_code in (401, 403):
+        return {"error": "credenciales_invalidas"}
+
+    if r.status_code == 422:
+        # ← clave para mostrar mensajes amigables en el front
+        return {"error": "validacion", "status_code": 422, "detail": r.json()}
+
+    # otros códigos
+    try:
+        detail = r.json().get("detail", r.text)
+    except Exception:
+        detail = r.text
+    return {"error": "otro_error", "status_code": r.status_code, "detail": detail}
 
 def register_user():
     st.subheader("📝 Registro de nuevo usuario")
