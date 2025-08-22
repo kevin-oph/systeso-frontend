@@ -24,7 +24,7 @@ from reset_password import mostrar_formulario_reset
 
 # ------------------- CONFIG -------------------
 st.set_page_config(page_title="Sistema de Recibos", layout="centered", page_icon="📄")
-BASE_URL = "https://systeso-backend-production.up.railway.app"
+BASE_URL = "https://api.zapatamorelos.gob.mx"
 
 # ------------------- BOOT COOKIES -------------------
 if "cookie_manager" not in st.session_state:
