@@ -421,41 +421,39 @@ elif st.session_state.view == "reenviar":
 elif st.session_state.view == "recuperar_password":
     st.subheader("🔑 Recuperar Contraseña")
 
-    if st.session_state.reset_reset_fields:
-        st.session_state.reset_email = ""
-        st.session_state.reset_reset_fields = False
-
-    # Form para enviar enlace y, si ok, redirigir a login con flash
-    with st.form("solicitar_reset_form", clear_on_submit=True):
+    # Eliminamos el reset_reset_fields manual de aquí para que no interfiera con el form
+    
+    with st.form("solicitar_reset_form", clear_on_submit=False): # Cambiado a False para evitar pérdida de datos en el envío
         email_reset = st.text_input(
             "📧 Ingresa tu correo registrado para restablecer tu contraseña",
-            value=st.session_state.reset_email,
-            key="reset_email",
+            key="reset_email_input" # Usamos una key nueva para evitar conflictos
         )
         send = st.form_submit_button("📨 Enviar enlace de recuperación")
 
     if send:
         if not email_reset:
-            st.warning("Debes ingresar un correo.")
+            st.warning("⚠️ Debes ingresar un correo.")
+        elif not re.match(EMAIL_REGEX, email_reset):
+            st.error("❌ El formato del correo no es válido.")
         else:
             with st.spinner("Enviando correo..."):
                 try:
-                    resp = requests.post(f"{BASE_URL}/users/solicitar_reset", json={"email": email_reset}, timeout=15)
+                    # Usamos .strip() para evitar espacios accidentales
+                    resp = requests.post(f"{BASE_URL}/users/solicitar_reset", json={"email": email_reset.strip()}, timeout=15)
+                    
+                    # Aceptamos 200 y 202 (proceso aceptado en background)
                     if resp.status_code in (200, 202):
-                        # 👉 Guardar 'flash' para mostrar en login y redirigir
                         st.session_state["_flash_login"] = (
                             "success",
-                            "Te enviamos un enlace de recuperación a tu correo (si existe en el sistema). Revisa tu bandeja y spam."
+                            "Te enviamos un enlace de recuperación. Revisa tu bandeja de entrada y la carpeta de SPAM."
                         )
-                        st.session_state.reset_reset_fields = True
                         st.session_state.view = "login"
                         st.rerun()
                     else:
-                        st.error("❌ No se pudo enviar el enlace. ¿El correo está registrado?")
-                except Exception:
-                    st.error("⚠️ No se pudo conectar al servidor.")
+                        st.error("❌ No se pudo procesar la solicitud. Verifica que el correo sea el correcto.")
+                except Exception as e:
+                    st.error(f"⚠️ Error de conexión: {e}")
 
     if st.button("🔙 Volver al login", key="btn_back_login_from_reset"):
         st.session_state.view = "login"
-        st.session_state.reset_reset_fields = True
         st.rerun()
