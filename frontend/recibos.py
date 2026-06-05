@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import base64
+import re  # Inyección de expresiones regulares para la extracción definitiva
 from streamlit_pdf_viewer import pdf_viewer
 from utils import obtener_token
 
@@ -9,36 +10,49 @@ from utils import obtener_token
 MESES_ORDEN = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
                "Jul", "Ago", "Sept", "Oct", "Nov", "Dic"]
 
-# Normalización desde los textos del periodo (vienen como "01-ene.-2025")
+# Normalización total desde los textos del periodo (soportando formatos cortos y nombres de mes completos de 2026/2027)
 MESES_MAP = {
-    "ene.": "Ene", "ene": "Ene",
-    "feb.": "Feb", "feb": "Feb",
-    "mar.": "Mar", "mar": "Mar",
-    "abr.": "Abr", "abr": "Abr",
-    "may.": "May",
-    "jun.": "Jun", "jun": "Jun",
-    "jul.": "Jul", "jul": "Jul",
-    "ago.": "Ago", "ago": "Ago",
-    "sept.": "Sept", "sep.": "Sept", "sept": "Sept", "sep": "Sept",
-    "oct.": "Oct", "oct": "Oct",
-    "nov.": "Nov", "nov": "Nov",
-    "dic.": "Dic", "dic": "Dic",
+    "ene.": "Ene", "ene": "Ene", "enero": "Ene",
+    "feb.": "Feb", "feb": "Feb", "febrero": "Feb",
+    "mar.": "Mar", "mar": "Mar", "marzo": "Mar",
+    "abr.": "Abr", "abr": "Abr", "abril": "Abr",
+    "may.": "May", "mayo": "May",
+    "jun.": "Jun", "jun": "Jun", "junio": "Jun",
+    "jul.": "Jul", "jul": "Jul", "julio": "Jul",
+    "ago.": "Ago", "ago": "Ago", "agosto": "Ago",
+    "sept.": "Sept", "sep.": "Sept", "sept": "Sept", "sep": "Sept", "septiembre": "Sept",
+    "oct.": "Oct", "oct": "Oct", "octubre": "Oct",
+    "nov.": "Nov", "nov": "Nov", "noviembre": "Nov",
+    "dic.": "Dic", "dic": "Dic", "diciembre": "Dic",
 }
 
 def _extraer_mes(periodo: str) -> str:
-    """De '01-ene.-2025 al 15-ene.-2025' devuelve 'Ene'."""
+    """
+    Busca de forma flexible el mes en la primera fecha del periodo.
+    Soporta estructuras con guiones, diagonales o espacios extras.
+    """
     try:
         fecha_inicio = periodo.split(" al ")[0]
-        _, mes_token, _ = fecha_inicio.split("-")
-        m = mes_token.strip().lower()
-        return MESES_MAP.get(m, m.capitalize())
+        # Extrae el bloque alfabético central que representa al mes
+        match = re.search(r"\d{1,2}\s*[\/-]\s*([A-Za-zÁÉÍÓÚáéíóú\.]+)\s*[\/-]\s*\d{4}", fecha_inicio)
+        if match:
+            m = match.group(1).strip().lower()
+            return MESES_MAP.get(m, m.capitalize())
+        return "Otro"
     except Exception:
         return "Otro"
 
 def _extraer_anio(periodo: str) -> str:
+    """
+    Extrae dinámicamente el año de 4 dígitos (2025, 2026, 2027, etc.) 
+    aislando el bloque numérico final de la primera fecha.
+    """
     try:
         fecha_inicio = periodo.split(" al ")[0]
-        return fecha_inicio.split("-")[-1]
+        match = re.search(r"\b(\d{4})\b", fecha_inicio)
+        if match:
+            return match.group(1)
+        return "0000"
     except Exception:
         return "0000"
 
@@ -68,14 +82,13 @@ def _descargar_pdf_bytes(pdf_endpoint: str, headers: dict):
 
 def _mostrar_pdf_centrado(
     pdf_bytes: bytes,
-    max_width_px: int = 1100,     # ancho máximo en desktop (sube a 1200/1280 si quieres)
-    height_vh: int = 88,          # alto relativo a la ventana (usa 80 si te queda muy alto)
-    max_height_px: int = 1200,    # tope de alto absoluto
-    viewport_margin_px: int = 48  # margen lateral para que no pegue a los bordes en móvil
+    max_width_px: int = 1100,
+    height_vh: int = 88,
+    max_height_px: int = 1200,
+    viewport_margin_px: int = 48
 ):
     """
     Muestra el PDF centrado y RESPONSIVO usando <object> con data:application/pdf.
-    Se ajusta al ancho de la ventana y respeta un ancho máximo en desktop.
     """
     b64 = base64.b64encode(pdf_bytes).decode("utf-8")
     html = f"""
@@ -126,7 +139,7 @@ def mostrar_recibos():
         st.info("No hay recibos disponibles.")
         return
 
-    # 2) Filtros (Año / Mes / Período) — SIN CAMBIOS VISUALES
+    # 2) Filtros Dinámicos (Año / Mes / Período)
     df = pd.DataFrame(recibos)
     df["anio"] = df["periodo"].apply(_extraer_anio)
     df["mes"]  = df["periodo"].apply(_extraer_mes)
@@ -137,6 +150,7 @@ def mostrar_recibos():
     col_anio, col_mes, col_periodo = st.columns([1, 1, 2])
 
     with col_anio:
+        # sorted con reverse=True asegura que los años más nuevos (2026, 2027) salgan primero automáticamente
         anios = sorted(df["anio"].unique(), reverse=True)
         anio_filtro = st.selectbox("📅 Filtrar por año:", options=anios)
 
@@ -169,7 +183,6 @@ def mostrar_recibos():
         st.write({"endpoint": pdf_endpoint, **err})
         return
 
-    # Mantén tu layout; sólo el visor es más ancho.
     col_izq, col_ctr, col_der = st.columns([0.05, 0.9, 0.05])
     with col_ctr:
         _mostrar_pdf_centrado(pdf_bytes, max_width_px=1200, height_vh=88)
