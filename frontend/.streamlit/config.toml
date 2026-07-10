@@ -1,7 +1,7 @@
 [server]
 enableCORS = false
 enableXsrfProtection = false
-websocketMaxMessageSize = 209715200 # Eleva el límite de subida de archivos
+
 
 [browser]
 gatherUsageStats = false
